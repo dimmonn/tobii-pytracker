@@ -14,12 +14,12 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Literal, Mapping, MutableMapping, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
 
-BBoxMethod = Literal["grid", "contrast", "superpixel"]
+BBoxMethod = Literal["grid", "contrast", "saliency", "superpixel"]
 
 
 @dataclass(frozen=True)
@@ -116,7 +116,7 @@ class ImageBoundingBoxGenerator:
     -------
     ``grid``
         Uniform coverage baseline. Useful as a conservative fallback.
-    ``contrast``
+    ``contrast`` / ``saliency``
         Finds connected components in a local-gradient/contrast mask. This is a
         dependency-safe saliency approximation.
     ``superpixel``
@@ -137,8 +137,8 @@ class ImageBoundingBoxGenerator:
         selected = method or self.method
         if selected == "grid":
             return self.grid(**kwargs)
-        if selected == "contrast":
-            return self.contrast(image_path, **kwargs)
+        if selected in {"contrast", "saliency"}:
+            return self.contrast(image_path, label=selected, **kwargs)
         if selected == "superpixel":
             return self.superpixels(image_path, **kwargs)
         raise ValueError(f"Unknown bbox generation method: {selected}")
@@ -169,6 +169,7 @@ class ImageBoundingBoxGenerator:
         min_area_ratio: float = 0.002,
         max_regions: int = 40,
         padding: int = 2,
+        label: str = "contrast",
     ) -> List[Dict[str, Any]]:
         rgb = _load_resized_rgb(image_path, (self.area_x, self.area_y))
         gray = _luminance(rgb)
@@ -176,7 +177,7 @@ class ImageBoundingBoxGenerator:
         threshold = np.percentile(score, percentile)
         mask = score >= threshold
         min_area = max(4, int(self.area_x * self.area_y * min_area_ratio))
-        components = self._components_from_mask(mask, score, min_area=min_area, padding=padding)
+        components = self._components_from_mask(mask, score, min_area=min_area, padding=padding, label=label)
         components.sort(key=lambda item: item["conf"], reverse=True)
         return components[:max_regions]
 
@@ -188,13 +189,7 @@ class ImageBoundingBoxGenerator:
         edge_percentile: float = 82.0,
         max_regions: int = 80,
     ) -> List[Dict[str, Any]]:
-        """Return compact edge-aware regions approximating superpixels.
-
-        The implementation uses the image after AOI resize, computes an edge mask
-        from luminance contrast, then runs connected components inside grid cells.
-        The resulting boxes are stable, deterministic, and match the screenshot
-        coordinate system used for gaze samples.
-        """
+        """Return compact edge-aware regions approximating superpixels."""
 
         rgb = _load_resized_rgb(image_path, (self.area_x, self.area_y))
         gray = _luminance(rgb)
@@ -233,7 +228,6 @@ class ImageBoundingBoxGenerator:
                     boxes.extend(local_components)
                     region_id += len(local_components)
                 else:
-                    # Preserve AOI coverage in very textured cells.
                     bbox = bbox_from_top_left(x0, y0, x1, y1, self.area_x, self.area_y)
                     boxes.append(_bbox_record("superpixel", 0.5, bbox, region_id=region_id))
                     region_id += 1
@@ -316,10 +310,10 @@ def evaluate_gaze_bbox_mapping(
 ) -> Dict[str, Any]:
     """Evaluate how well gaze points map to generated bboxes.
 
-    Returns aggregate coverage plus per-box hit counts.  ``coverage`` is the
+    Returns aggregate coverage plus per-box hit counts. ``coverage`` is the
     fraction of valid gaze samples that landed inside at least one generated box.
-    This can be used post-hoc to compare ``grid``, ``contrast``, ``superpixel``
-    and any custom model-generated boxes for the same screenshot.
+    This can be used post-hoc to compare ``grid``, ``contrast``/``saliency``,
+    ``superpixel`` and any custom model-generated boxes for the same screenshot.
     """
 
     boxes = [record for record in bbox_records if "bbox" in record]
