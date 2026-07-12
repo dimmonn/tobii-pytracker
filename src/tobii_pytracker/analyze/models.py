@@ -1331,3 +1331,377 @@ class VoiceTranscription(BaseAnalyzer):
         super().__init__(background_data)
     #TODO: Implement methods for concept definition and analysis.
     
+
+
+# BBOX stuff
+import ast
+import json
+from pathlib import Path
+from typing import Optional, Any, Dict, List
+
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+import matplotlib.patches as patches
+import numpy as np
+import pandas as pd
+
+
+class BBoxAttentionAnalyzer:
+    """
+    Maps gaze/fixation points to generated image bounding boxes.
+
+    Expected bbox format:
+        {
+            "class": "superpixel",
+            "conf": 1.0,
+            "bbox": {
+                "cx": ...,
+                "cy": ...,
+                "w": ...,
+                "h": ...
+            }
+        }
+
+    Coordinates are expected to be centered screen/AOI coordinates:
+        x = 0, y = 0 is image center.
+    """
+
+    def __init__(self, output_folder: Path):
+        self.output_folder = Path(output_folder)
+        self.output_folder.mkdir(parents=True, exist_ok=True)
+        self.results: Optional[pd.DataFrame] = None
+
+    # ------------------------------------------------------------
+    # Parsing helpers
+    # ------------------------------------------------------------
+    @staticmethod
+    def _parse_objects_bboxes(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                try:
+                    return ast.literal_eval(value)
+                except Exception:
+                    return {"image_bboxes": []}
+
+        return {"image_bboxes": []}
+
+    @staticmethod
+    def _bbox_edges_centered(bbox: Dict[str, float]) -> Dict[str, float]:
+        cx = float(bbox["cx"])
+        cy = float(bbox["cy"])
+        w = float(bbox["w"])
+        h = float(bbox["h"])
+
+        return {
+            "x_min": cx - w / 2.0,
+            "x_max": cx + w / 2.0,
+            "y_min": cy - h / 2.0,
+            "y_max": cy + h / 2.0,
+        }
+
+    @staticmethod
+    def _point_inside_bbox(x: float, y: float, bbox: Dict[str, float]) -> bool:
+        edges = BBoxAttentionAnalyzer._bbox_edges_centered(bbox)
+
+        return (
+            edges["x_min"] <= x <= edges["x_max"]
+            and edges["y_min"] <= y <= edges["y_max"]
+        )
+
+    # ------------------------------------------------------------
+    # Main analysis
+    # ------------------------------------------------------------
+    def analyze(
+        self,
+        raw_data: pd.DataFrame,
+        gaze_data: pd.DataFrame,
+        use_fixations: bool = False,
+    ) -> pd.DataFrame:
+        """
+        Score every bbox by the gaze/fixation points that fall inside it.
+
+        Parameters
+        ----------
+        raw_data:
+            Non-flattened data from DataLoader.get_all_data(flatten=False).
+            Must contain objects_bboxes, screenshot_file, set_name/slide_index or row index.
+
+        gaze_data:
+            Flattened gaze/fixation data.
+            Must contain avg_gaze_x, avg_gaze_y, set_name, slide_index.
+
+        use_fixations:
+            If True, expects fixation-style columns:
+            x_mean, y_mean, duration.
+            If False, uses raw gaze columns:
+            avg_gaze_x, avg_gaze_y.
+
+        Returns
+        -------
+        DataFrame with one row per bbox and attention metrics.
+        """
+        records = []
+
+        if "set_name" not in raw_data.columns:
+            raise ValueError("raw_data must contain set_name column.")
+
+        raw_data = raw_data.copy()
+        gaze_data = gaze_data.copy()
+
+        if "slide_index" not in raw_data.columns:
+            raw_data["slide_index"] = raw_data.groupby("set_name").cumcount()
+
+        raw_data["slide_index"] = pd.to_numeric(
+            raw_data["slide_index"],
+            errors="coerce",
+        ).astype("Int64")
+
+        gaze_data["slide_index"] = pd.to_numeric(
+            gaze_data["slide_index"],
+            errors="coerce",
+        ).astype("Int64")
+
+        if use_fixations:
+            x_col = "x_mean"
+            y_col = "y_mean"
+            duration_col = "duration"
+        else:
+            x_col = "avg_gaze_x"
+            y_col = "avg_gaze_y"
+            duration_col = None
+
+        for _, row in raw_data.iterrows():
+            set_name = str(row["set_name"])
+            slide_index = int(row["slide_index"])
+
+            slide_gaze = gaze_data[
+                (gaze_data["set_name"].astype(str) == set_name)
+                & (gaze_data["slide_index"].astype("Int64") == slide_index)
+            ].copy()
+
+            slide_gaze = slide_gaze.dropna(subset=[x_col, y_col])
+
+            bbox_container = self._parse_objects_bboxes(
+                row.get("objects_bboxes", {})
+            )
+            image_bboxes = bbox_container.get("image_bboxes", [])
+
+            total_points = len(slide_gaze)
+
+            for bbox_index, bbox_record in enumerate(image_bboxes):
+                bbox = bbox_record.get("bbox", {})
+
+                if not {"cx", "cy", "w", "h"}.issubset(bbox.keys()):
+                    continue
+
+                hits = []
+
+                for gaze_idx, gaze_row in slide_gaze.iterrows():
+                    x = float(gaze_row[x_col])
+                    y = float(gaze_row[y_col])
+
+                    if self._point_inside_bbox(x, y, bbox):
+                        hits.append(gaze_row)
+
+                hit_count = len(hits)
+                coverage = hit_count / total_points if total_points else 0.0
+
+                if hits and duration_col and duration_col in slide_gaze.columns:
+                    dwell_time = float(
+                        pd.DataFrame(hits)[duration_col].fillna(0).sum()
+                    )
+                else:
+                    dwell_time = float(hit_count)
+
+                records.append({
+                    "set_name": set_name,
+                    "slide_index": slide_index,
+                    "screenshot_file": row.get("screenshot_file"),
+                    "input_data": row.get("input_data"),
+                    "bbox_index": bbox_index,
+                    "bbox_class": bbox_record.get("class"),
+                    "bbox_conf": bbox_record.get("conf"),
+                    "cx": float(bbox["cx"]),
+                    "cy": float(bbox["cy"]),
+                    "w": float(bbox["w"]),
+                    "h": float(bbox["h"]),
+                    "total_gaze_points": total_points,
+                    "hit_count": hit_count,
+                    "coverage": coverage,
+                    "dwell_time": dwell_time,
+                    "attention_score": coverage,
+                })
+
+        result = pd.DataFrame(records)
+
+        if not result.empty:
+            result["attention_rank"] = (
+                result.groupby(["set_name", "slide_index"])["attention_score"]
+                .rank(method="dense", ascending=False)
+                .astype(int)
+            )
+
+        self.results = result
+        return result
+
+    # ------------------------------------------------------------
+    # Summary metrics
+    # ------------------------------------------------------------
+    def evaluate(self, scored_bboxes: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+        """
+        Compute per-slide bbox quality metrics.
+
+        Metrics:
+        - fixation/gaze coverage by any bbox
+        - number of attended bboxes
+        - percentage of attended bboxes
+        - max bbox attention score
+        """
+        df = scored_bboxes if scored_bboxes is not None else self.results
+
+        if df is None or df.empty:
+            return pd.DataFrame()
+
+        grouped = []
+
+        for (set_name, slide_index), group in df.groupby(["set_name", "slide_index"]):
+            total_points = int(group["total_gaze_points"].max())
+            total_hits = int(group["hit_count"].sum())
+            bbox_count = len(group)
+            attended_bboxes = int((group["hit_count"] > 0).sum())
+
+            grouped.append({
+                "set_name": set_name,
+                "slide_index": slide_index,
+                "bbox_count": bbox_count,
+                "attended_bboxes": attended_bboxes,
+                "attended_bbox_ratio": attended_bboxes / bbox_count if bbox_count else 0.0,
+                "total_gaze_points": total_points,
+                "bbox_hit_count": total_hits,
+                "coverage_by_bboxes": total_hits / total_points if total_points else 0.0,
+                "max_attention_score": float(group["attention_score"].max()),
+                "mean_attention_score": float(group["attention_score"].mean()),
+            })
+
+        return pd.DataFrame(grouped)
+
+    # ------------------------------------------------------------
+    # Visualization
+    # ------------------------------------------------------------
+    def plot_analysis(
+        self,
+        scored_bboxes: pd.DataFrame,
+        gaze_data: pd.DataFrame,
+        screenshot_path: Path,
+        set_name: str,
+        slide_index: int,
+        title: Optional[str] = None,
+        top_k: Optional[int] = 20,
+        min_hits: int = 1,
+        show_gaze: bool = True,
+        show: bool = True,
+        save_path: Optional[Path] = None,
+    ):
+        """
+        Plot screenshot + attended bboxes + gaze points.
+
+        Redder / stronger boxes mean more gaze points inside the bbox.
+        """
+        screenshot_path = Path(screenshot_path)
+
+        if not screenshot_path.exists():
+            raise FileNotFoundError(f"Screenshot not found: {screenshot_path}")
+
+        img = mpimg.imread(screenshot_path)
+        H, W = img.shape[:2]
+
+        boxes = scored_bboxes[
+            (scored_bboxes["set_name"].astype(str) == str(set_name))
+            & (pd.to_numeric(scored_bboxes["slide_index"], errors="coerce") == int(slide_index))
+        ].copy()
+
+        if min_hits is not None:
+            boxes = boxes[boxes["hit_count"] >= min_hits]
+
+        if top_k is not None:
+            boxes = boxes.sort_values("attention_score", ascending=False).head(top_k)
+
+        slide_gaze = gaze_data[
+            (gaze_data["set_name"].astype(str) == str(set_name))
+            & (pd.to_numeric(gaze_data["slide_index"], errors="coerce") == int(slide_index))
+        ].copy()
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.imshow(img, origin="upper")
+
+        # Draw gaze points
+        if show_gaze and not slide_gaze.empty:
+            gx = W / 2.0 + slide_gaze["avg_gaze_x"].astype(float)
+            gy = H / 2.0 - slide_gaze["avg_gaze_y"].astype(float)
+
+            ax.scatter(
+                gx,
+                gy,
+                s=12,
+                alpha=0.45,
+                label="gaze samples",
+            )
+
+        # Draw bboxes
+        max_score = boxes["attention_score"].max() if not boxes.empty else 0.0
+
+        for _, row in boxes.iterrows():
+            cx = float(row["cx"])
+            cy = float(row["cy"])
+            bw = float(row["w"])
+            bh = float(row["h"])
+
+            # centered coords -> image pixel coords
+            x_min = W / 2.0 + (cx - bw / 2.0)
+            y_min = H / 2.0 - (cy + bh / 2.0)
+
+            score = float(row["attention_score"])
+            intensity = score / max_score if max_score > 0 else 0.0
+
+            rect = patches.Rectangle(
+                (x_min, y_min),
+                bw,
+                bh,
+                linewidth=1.0 + 3.0 * intensity,
+                edgecolor="red",
+                facecolor="none",
+                alpha=0.25 + 0.75 * intensity,
+            )
+
+            ax.add_patch(rect)
+
+            ax.text(
+                x_min,
+                y_min - 2,
+                f"{int(row['hit_count'])}",
+                color="yellow",
+                fontsize=8,
+                bbox=dict(facecolor="black", alpha=0.4, pad=1),
+            )
+
+        ax.set_title(
+            title or f"BBox attention — {set_name}, slide {slide_index}"
+        )
+        ax.axis("off")
+
+        if save_path:
+            save_path = Path(save_path)
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(save_path, bbox_inches="tight", dpi=200)
+
+        if show:
+            plt.show()
+        else:
+            plt.close(fig)
+
+        return fig, ax
