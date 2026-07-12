@@ -233,22 +233,29 @@ class ImageDataset(CustomDataset):
 
         self.model = None
         self.default_detector = None
-        if calculate_bboxes:
-            self.default_detector = config.get("default_detector", "grid")  # grid | superpixel | saliency
-    
-        # Attempt to load a custom model from config
+
         if self.calculate_bboxes:
+            image_config = self.config.get_image_dataset_config()
+            self.default_detector = image_config.get("bbox_model", "grid")
+
+        if self.calculate_bboxes and "bbox_model" in self.config.config:
             try:
                 cfg = self.config.get_bbox_model_config()
+
                 ModelClass = getattr(
-                    importlib.import_module(f"{cfg['folder']}.{cfg['module']}"),
-                    cfg['class']
+                    importlib.import_module(
+                        f"{cfg['folder']}.{cfg['module']}"
+                    ),
+                    cfg["class"],
                 )
+
                 self.model = ModelClass(config, self)
-            except Exception as e:
+
+            except Exception as exc:
                 self.logger.warning(
-                    f"No valid custom bbox model found in config; "
-                    f"using fallback detector ({self.default_detector}). Error: {e}"
+                    f"Could not load custom bbox model; "
+                    f"using fallback detector ({self.default_detector}). "
+                    f"Error: {exc}"
                 )
                 self.model = None
 
@@ -364,21 +371,38 @@ class ImageDataset(CustomDataset):
     # SUPERPIXEL fallback
     # ------------------------------------------------------------------
     def _detect_superpixels(self, image_path: str, n_segments: int = 50):
-        from skimage.segmentation import slic
-        from skimage.io import imread
         import numpy as np
+        from PIL import Image
+        from skimage.segmentation import slic
 
         area_x, area_y = self.config.get_area_of_interest_size()
-        img = imread(image_path)
+
+        with Image.open(image_path) as pil_image:
+            pil_image.seek(0)
+            img = np.asarray(pil_image.convert("RGB"))
+
         h, w = img.shape[:2]
 
-        segments = slic(img, n_segments=n_segments, compactness=10)
+        segments = slic(
+            img,
+            n_segments=n_segments,
+            compactness=10,
+            start_label=0,
+            channel_axis=-1,
+        )
+
         detections = []
 
         for seg_id in np.unique(segments):
             ys, xs = np.where(segments == seg_id)
-            x_min, x_max = xs.min(), xs.max()
-            y_min, y_max = ys.min(), ys.max()
+
+            if len(xs) == 0:
+                continue
+
+            x_min = int(xs.min())
+            x_max = int(xs.max()) + 1
+            y_min = int(ys.min())
+            y_max = int(ys.max()) + 1
 
             detections.append({
                 "class": "superpixel",
@@ -388,8 +412,9 @@ class ImageDataset(CustomDataset):
                     y_min * (area_y / h),
                     x_max * (area_x / w),
                     y_max * (area_y / h),
-                    area_x, area_y
-                )
+                    area_x,
+                    area_y,
+                ),
             })
 
         return detections

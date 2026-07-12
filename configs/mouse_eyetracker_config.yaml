@@ -3,7 +3,9 @@ eyetracker.hw.mouse.EyeTracker:
     #   True = Automatically start reporting events for this device when the experiment starts.
     #   False = Do not start reporting events for this device until enableEventReporting(True)
     #   is called for the device.
-    auto_report_events: False
+    # this seems to be broken, psychopy.iohub.errors.ioHubError: ioHubError:
+    #Args: ('Device config validation failed',)
+    # auto_report_events: True
 
     # Should eye tracker events be saved to the ioHub DataStore file when the device
     # is recording data ?
@@ -142,11 +144,13 @@ eyetracker.hw.mouse.EyeTracker:
     controls:
         # Mouse Button used to make a MouseGaze position change.
         # LEFT_BUTTON, MIDDLE_BUTTON, RIGHT_BUTTON.
-        move: RIGHT_BUTTON
+        move:
+          - RIGHT_BUTTON
 
         # Mouse Button(s) used to make MouseGaze generate a blink event.
         # LEFT_BUTTON, MIDDLE_BUTTON, RIGHT_BUTTON.
-        blink: [LEFT_BUTTON,RIGHT_BUTTON]
+        blink:
+          - LEFT_BUTTON
 
         # Threshold for saccade generation. Specified in visual degrees.
         saccade_threshold: 0.5

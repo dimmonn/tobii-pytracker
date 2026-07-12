@@ -7,12 +7,13 @@ from datetime import datetime
 import traceback
 from psychopy import event, core
 
-from .utils import gui, eyetracker
-from .utils.voice import VoiceRecorder
-from .utils.custom_logger import CustomLogger
-from .configs.custom_config import CustomConfig
-from .datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
-
+from utils import gui, eyetracker
+from utils.voice import VoiceRecorder
+from utils.custom_logger import CustomLogger
+from configs.custom_config import CustomConfig
+from datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
+import os
+import pprint
 
 LOGGER = None
 
@@ -122,7 +123,8 @@ def main(config, loop_count, eyetracker_config_file,
     elif config.dataset_type == "time_series":
         dataset = TimeSeriesDataset(config)
     elif config.dataset_type == "image":
-        dataset = ImageDataset(config)
+        #dataset = ImageDataset(config)
+        dataset = ImageDataset(config, calculate_bboxes=True)
     monitor, window, buttons = None, None, None
 
     # --- Optional PsychoPy GUI setup ---
@@ -157,6 +159,9 @@ def main(config, loop_count, eyetracker_config_file,
     iohub_config = CustomConfig.read_config(eyetracker_config_file)
     is_mouse_tracker =  eyetracker.is_mouse_eyetracker(iohub_config)
     move_button_idx = eyetracker.get_mouse_move_button_idx(iohub_config)
+
+    print("Eye tracker config:", os.path.abspath(eyetracker_config_file))
+    pprint.pprint(iohub_config)
 
     # --- Main try/finally block to ensure cleanup ---
     try:
@@ -242,8 +247,11 @@ def main(config, loop_count, eyetracker_config_file,
                                 # Determine if we should record gaze samples
                                 should_record = True
                                 if is_mouse_tracker:
-                                    pressed = mouse.getPressed()
-                                    should_record = pressed[move_button_idx]  # only record while configured button pressed
+                                    if move_button_idx == -1:
+                                        should_record = True
+                                    else:
+                                        pressed = mouse.getPressed()
+                                        should_record = bool(pressed[move_button_idx])
 
                                 if should_record:
                                     current_time = core.getTime()
@@ -334,7 +342,7 @@ def cli():
     parser = argparse.ArgumentParser()
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, default='configs/config.yaml', help='Path to YAML script config file')
-    parser.add_argument('--eyetracker_config_file', type=str, default='configs/eyetracker_config.yaml', help='Path to YAML eyetracker config file')
+    parser.add_argument('--eyetracker_config_file', type=str, default='/Users/dima/tobii/tobii-pytracker/configs/mouse_eyetracker_config.yaml', help='Path to YAML eyetracker config file')
 
     # Boolean flags
     parser.add_argument('--enable_eyetracker', action='store_true', help='Launch script with launchHubServer (needs connected eyetracker if set)')
@@ -368,4 +376,3 @@ if __name__ == "__main__":
 
 
 
-    

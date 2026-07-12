@@ -20,9 +20,16 @@ ultralytics<=8.4
 msgpack_numpy==0.4.8
 scikit-learn==1.7.2
 psychopy-eyetracker-tobii==0.0.3
-tobii-research==2.0.0 
-# Install pywin32 only on Windows
+psychopy>=2024.1.4,<2025.1.0
+tobii-research==2.1.0
+
+# macOS
+sounddevice==0.5.3; platform_system == "Darwin"
+soundfile==0.13.1; platform_system == "Darwin"
+pyobjc-core<8; platform_system == "Darwin"
+pyobjc-framework-Cocoa<8; platform_system == "Darwin"
+pyobjc-framework-Quartz<8; platform_system == "Darwin"
+
+# Windows
 pywin32==311; platform_system == "Windows"
-sounddevice==0.5.3; platform_system == "Windows"
-soundfile==0.13.1; platform_system == "Windows"
 pyWinhook==1.6.2; platform_system == "Windows"
