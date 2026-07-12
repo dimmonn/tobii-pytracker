@@ -7,11 +7,11 @@ from datetime import datetime
 import traceback
 from psychopy import event, core
 
-from utils import gui, eyetracker
-from utils.voice import VoiceRecorder
-from utils.custom_logger import CustomLogger
-from configs.custom_config import CustomConfig
-from datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
+from .utils import gui, eyetracker
+from .utils.voice import VoiceRecorder
+from .utils.custom_logger import CustomLogger
+from .configs.custom_config import CustomConfig
+from .datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
 import os
 import pprint
 
