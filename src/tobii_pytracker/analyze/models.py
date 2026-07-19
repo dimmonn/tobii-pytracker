@@ -1500,6 +1500,7 @@ class BBoxAttentionAnalyzer:
                     continue
 
                 hits = []
+                hit_gaze_indices = []
 
                 for gaze_idx, gaze_row in slide_gaze.iterrows():
                     x = float(gaze_row[x_col])
@@ -1507,6 +1508,7 @@ class BBoxAttentionAnalyzer:
 
                     if self._point_inside_bbox(x, y, bbox):
                         hits.append(gaze_row)
+                        hit_gaze_indices.append(int(gaze_idx))
 
                 hit_count = len(hits)
                 coverage = hit_count / total_points if total_points else 0.0
@@ -1532,6 +1534,7 @@ class BBoxAttentionAnalyzer:
                     "h": float(bbox["h"]),
                     "total_gaze_points": total_points,
                     "hit_count": hit_count,
+                    "hit_gaze_indices": hit_gaze_indices,
                     "coverage": coverage,
                     "dwell_time": dwell_time,
                     "attention_score": coverage,
@@ -1552,15 +1555,24 @@ class BBoxAttentionAnalyzer:
     # ------------------------------------------------------------
     # Summary metrics
     # ------------------------------------------------------------
-    def evaluate(self, scored_bboxes: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def evaluate(
+            self,
+            scored_bboxes: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
         """
-        Compute per-slide bbox quality metrics.
+        Compute per-slide bbox/gaze metrics.
 
-        Metrics:
-        - fixation/gaze coverage by any bbox
-        - number of attended bboxes
-        - percentage of attended bboxes
-        - max bbox attention score
+        Notes
+        -----
+        bbox_hit_count:
+            Total number of gaze-to-bbox memberships. A gaze point may be
+            counted more than once when bounding boxes overlap.
+
+        unique_gaze_hit_count:
+            Number of distinct gaze points contained in at least one bbox.
+
+        coverage_by_bboxes:
+            Unique gaze coverage, always between 0 and 1.
         """
         df = scored_bboxes if scored_bboxes is not None else self.results
 
@@ -1569,23 +1581,69 @@ class BBoxAttentionAnalyzer:
 
         grouped = []
 
-        for (set_name, slide_index), group in df.groupby(["set_name", "slide_index"]):
+        for (set_name, slide_index), group in df.groupby(
+                ["set_name", "slide_index"]
+        ):
             total_points = int(group["total_gaze_points"].max())
-            total_hits = int(group["hit_count"].sum())
             bbox_count = len(group)
             attended_bboxes = int((group["hit_count"] > 0).sum())
+
+            # May exceed total_points because overlapping rectangles can
+            # contain the same gaze point.
+            total_bbox_memberships = int(group["hit_count"].sum())
+
+            # Union of gaze samples covered by at least one bbox.
+            unique_hit_indices = set()
+
+            if "hit_gaze_indices" in group.columns:
+                for indices in group["hit_gaze_indices"]:
+                    if isinstance(indices, (list, tuple, set, np.ndarray)):
+                        unique_hit_indices.update(int(i) for i in indices)
+
+            unique_gaze_hit_count = len(unique_hit_indices)
+
+            unique_coverage = (
+                unique_gaze_hit_count / total_points
+                if total_points
+                else 0.0
+            )
+
+            overlap_factor = (
+                total_bbox_memberships / unique_gaze_hit_count
+                if unique_gaze_hit_count
+                else 0.0
+            )
 
             grouped.append({
                 "set_name": set_name,
                 "slide_index": slide_index,
                 "bbox_count": bbox_count,
                 "attended_bboxes": attended_bboxes,
-                "attended_bbox_ratio": attended_bboxes / bbox_count if bbox_count else 0.0,
+                "attended_bbox_ratio": (
+                    attended_bboxes / bbox_count
+                    if bbox_count
+                    else 0.0
+                ),
                 "total_gaze_points": total_points,
-                "bbox_hit_count": total_hits,
-                "coverage_by_bboxes": total_hits / total_points if total_points else 0.0,
-                "max_attention_score": float(group["attention_score"].max()),
-                "mean_attention_score": float(group["attention_score"].mean()),
+
+                # Total memberships; may exceed total_gaze_points.
+                "bbox_hit_count": total_bbox_memberships,
+
+                # Distinct gaze samples covered by at least one bbox.
+                "unique_gaze_hit_count": unique_gaze_hit_count,
+
+                # Correct bounded coverage metric.
+                "coverage_by_bboxes": unique_coverage,
+
+                # Shows how much bbox overlap affects counting.
+                "overlap_factor": overlap_factor,
+
+                "max_attention_score": float(
+                    group["attention_score"].max()
+                ),
+                "mean_attention_score": float(
+                    group["attention_score"].mean()
+                ),
             })
 
         return pd.DataFrame(grouped)
@@ -1594,110 +1652,175 @@ class BBoxAttentionAnalyzer:
     # Visualization
     # ------------------------------------------------------------
     def plot_analysis(
-        self,
-        scored_bboxes: pd.DataFrame,
-        gaze_data: pd.DataFrame,
-        screenshot_path: Path,
-        set_name: str,
-        slide_index: int,
-        title: Optional[str] = None,
-        top_k: Optional[int] = 20,
-        min_hits: int = 1,
-        show_gaze: bool = True,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            scored_bboxes: pd.DataFrame,
+            gaze_data: pd.DataFrame,
+            screenshot_path: Path,
+            set_name: Optional[str] = None,
+            slide_index: Optional[int] = None,
+            title: Optional[str] = None,
+            top_k: Optional[int] = 20,
+            min_hits: int = 1,
+            show_gaze: bool = True,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
-        Plot screenshot + attended bboxes + gaze points.
+        Plot screenshot, attended bboxes and gaze samples.
 
-        Redder / stronger boxes mean more gaze points inside the bbox.
+        Filtering follows the same convention as FixationAnalyzer and
+        SaccadeAnalyzer: set_name and slide_index are optional filters.
+
+        The caller remains responsible for providing the screenshot that
+        corresponds to the selected set and slide.
         """
         screenshot_path = Path(screenshot_path)
 
         if not screenshot_path.exists():
-            raise FileNotFoundError(f"Screenshot not found: {screenshot_path}")
+            raise FileNotFoundError(
+                f"Screenshot not found: {screenshot_path}"
+            )
 
-        img = mpimg.imread(screenshot_path)
-        H, W = img.shape[:2]
+        boxes = scored_bboxes.copy()
+        slide_gaze = gaze_data.copy()
 
-        boxes = scored_bboxes[
-            (scored_bboxes["set_name"].astype(str) == str(set_name))
-            & (pd.to_numeric(scored_bboxes["slide_index"], errors="coerce") == int(slide_index))
-        ].copy()
+        if set_name is not None:
+            boxes = boxes[
+                boxes["set_name"].astype(str) == str(set_name)
+                ]
+            slide_gaze = slide_gaze[
+                slide_gaze["set_name"].astype(str) == str(set_name)
+                ]
+
+        if slide_index is not None:
+            boxes = boxes[
+                pd.to_numeric(
+                    boxes["slide_index"],
+                    errors="coerce",
+                ) == int(slide_index)
+                ]
+
+            slide_gaze = slide_gaze[
+                pd.to_numeric(
+                    slide_gaze["slide_index"],
+                    errors="coerce",
+                ) == int(slide_index)
+                ]
 
         if min_hits is not None:
             boxes = boxes[boxes["hit_count"] >= min_hits]
 
-        if top_k is not None:
-            boxes = boxes.sort_values("attention_score", ascending=False).head(top_k)
+        if boxes.empty:
+            raise ValueError(
+                "No attended bboxes to plot for the given filters."
+            )
 
-        slide_gaze = gaze_data[
-            (gaze_data["set_name"].astype(str) == str(set_name))
-            & (pd.to_numeric(gaze_data["slide_index"], errors="coerce") == int(slide_index))
-        ].copy()
+        if top_k is not None:
+            boxes = (
+                boxes
+                .sort_values(
+                    "attention_score",
+                    ascending=False,
+                )
+                .head(top_k)
+            )
+
+        img = mpimg.imread(screenshot_path)
+        height, width = img.shape[:2]
 
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.imshow(img, origin="upper")
 
-        # Draw gaze points
+        # Raw gaze samples: blue dots.
         if show_gaze and not slide_gaze.empty:
-            gx = W / 2.0 + slide_gaze["avg_gaze_x"].astype(float)
-            gy = H / 2.0 - slide_gaze["avg_gaze_y"].astype(float)
+            gaze_x = (
+                    width / 2.0
+                    + slide_gaze["avg_gaze_x"].astype(float)
+            )
+            gaze_y = (
+                    height / 2.0
+                    - slide_gaze["avg_gaze_y"].astype(float)
+            )
 
             ax.scatter(
-                gx,
-                gy,
+                gaze_x,
+                gaze_y,
                 s=12,
                 alpha=0.45,
                 label="gaze samples",
             )
 
-        # Draw bboxes
-        max_score = boxes["attention_score"].max() if not boxes.empty else 0.0
+        max_score = float(boxes["attention_score"].max())
 
         for _, row in boxes.iterrows():
             cx = float(row["cx"])
             cy = float(row["cy"])
-            bw = float(row["w"])
-            bh = float(row["h"])
+            bbox_width = float(row["w"])
+            bbox_height = float(row["h"])
 
-            # centered coords -> image pixel coords
-            x_min = W / 2.0 + (cx - bw / 2.0)
-            y_min = H / 2.0 - (cy + bh / 2.0)
+            # Centered PsychoPy coordinates -> image coordinates.
+            x_min = width / 2.0 + (cx - bbox_width / 2.0)
+            y_min = height / 2.0 - (cy + bbox_height / 2.0)
 
             score = float(row["attention_score"])
-            intensity = score / max_score if max_score > 0 else 0.0
+            intensity = (
+                score / max_score
+                if max_score > 0
+                else 0.0
+            )
 
-            rect = patches.Rectangle(
+            rectangle = patches.Rectangle(
                 (x_min, y_min),
-                bw,
-                bh,
-                linewidth=1.0 + 3.0 * intensity,
-                edgecolor="red",
+                bbox_width,
+                bbox_height,
+                linewidth=4.0,
+                edgecolor="black",
                 facecolor="none",
                 alpha=0.25 + 0.75 * intensity,
             )
 
-            ax.add_patch(rect)
+            ax.add_patch(rectangle)
 
             ax.text(
-                x_min,
-                y_min - 2,
+                x_min + 3,
+                y_min + 14,
                 f"{int(row['hit_count'])}",
-                color="yellow",
-                fontsize=8,
-                bbox=dict(facecolor="black", alpha=0.4, pad=1),
+                color="white",
+                fontsize=10,
+                fontweight="bold",
+                zorder=11,
+                bbox=dict(
+                    facecolor="black",
+                    edgecolor="white",
+                    alpha=1.0,
+                    pad=2,
+                ),
             )
 
+        set_label = set_name if set_name is not None else "All sets"
+        slide_label = (
+            slide_index
+            if slide_index is not None
+            else "All slides"
+        )
+
         ax.set_title(
-            title or f"BBox attention — {set_name}, slide {slide_index}"
+            title
+            or f"BBox attention — {set_label}, slide {slide_label}"
         )
         ax.axis("off")
 
-        if save_path:
+        if save_path is not None:
             save_path = Path(save_path)
-            save_path.parent.mkdir(parents=True, exist_ok=True)
-            plt.savefig(save_path, bbox_inches="tight", dpi=200)
+            save_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            fig.savefig(
+                save_path,
+                bbox_inches="tight",
+                dpi=200,
+            )
 
         if show:
             plt.show()

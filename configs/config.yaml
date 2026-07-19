@@ -2,7 +2,7 @@ dataset:
   image:
     #bbox_model:  grid | superpixel | saliency
     bbox_model:  superpixel
-    path: datasets/chess
+    path: /Users/dima/tobii/tobii-pytracker/datasets
   # text:
   #   label_column_name: sentiment
   #   text_column_name: content
