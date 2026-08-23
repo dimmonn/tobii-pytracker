@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - test-bbox-image-dataset-tuning # Temporary branch for testing bbox image dataset tuning
+      - test-bbox-image-dataset-tuning
       - main
   pull_request:
     branches:
@@ -22,6 +22,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install headless PsychoPy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglu1-mesa \
+            libgl1-mesa-dri \
+            xvfb
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
         with:
@@ -37,10 +45,14 @@ jobs:
       - name: Install PsychoPy runtime dependency
         run: python -m pip install "psychopy>=2024.1.4,<2025.1.0" --no-deps
 
-      - name: Run unit tests
+      - name: Run unit tests in virtual X display
         env:
           PYTHONUNBUFFERED: "1"
-        run: python -m unittest discover -s tests -p "test_*.py" -v
+          DISPLAY: ":99"
+        run: |
+          xvfb-run -a \
+            -s "-screen 0 1280x1024x24" \
+            python -m unittest discover -s tests -p "test_*.py" -v
 
   package:
     name: Build package
