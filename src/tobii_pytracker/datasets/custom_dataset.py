@@ -115,7 +115,7 @@ class TextDataset(CustomDataset):
             pos=(0, 0),
             height=self.font_height,
             wrapWidth=wrap_width,
-            alignText="left",   # we'll center the block ourselves by computing left offset
+            alignText="left",  # we'll center the block ourselves by computing left offset
             color="white"
         )
         paragraph.draw()
@@ -188,7 +188,8 @@ class TextDataset(CustomDataset):
             line_y_min = y_cursor
             line_y_max = y_cursor + line_h
 
-            line_bbox_centered = _to_centered_bbox_from_tl(line_x_min, line_y_min, line_x_max, line_y_max, area_x, area_y)
+            line_bbox_centered = _to_centered_bbox_from_tl(line_x_min, line_y_min, line_x_max, line_y_max, area_x,
+                                                           area_y)
             lines_out.append({
                 "text": " ".join([w for (w, _, _) in line]),
                 "conf": 1.0,
@@ -217,6 +218,7 @@ class TextDataset(CustomDataset):
 
         return {"words": words_out, "lines": lines_out}
 
+
 class ImageDataset(CustomDataset):
     """
     Image dataset that draws images and computes bounding boxes.
@@ -233,29 +235,22 @@ class ImageDataset(CustomDataset):
 
         self.model = None
         self.default_detector = None
+        if calculate_bboxes:
+            self.default_detector = config.get("default_detector", "grid")  # grid | superpixel | saliency
 
+        # Attempt to load a custom model from config
         if self.calculate_bboxes:
-            image_config = self.config.get_image_dataset_config()
-            self.default_detector = image_config.get("bbox_model", "grid")
-
-        if self.calculate_bboxes and "bbox_model" in self.config.config:
             try:
                 cfg = self.config.get_bbox_model_config()
-
                 ModelClass = getattr(
-                    importlib.import_module(
-                        f"{cfg['folder']}.{cfg['module']}"
-                    ),
-                    cfg["class"],
+                    importlib.import_module(f"{cfg['folder']}.{cfg['module']}"),
+                    cfg['class']
                 )
-
                 self.model = ModelClass(config, self)
-
-            except Exception as exc:
+            except Exception as e:
                 self.logger.warning(
-                    f"Could not load custom bbox model; "
-                    f"using fallback detector ({self.default_detector}). "
-                    f"Error: {exc}"
+                    f"No valid custom bbox model found in config; "
+                    f"using fallback detector ({self.default_detector}). Error: {e}"
                 )
                 self.model = None
 
@@ -371,6 +366,8 @@ class ImageDataset(CustomDataset):
     # SUPERPIXEL fallback
     # ------------------------------------------------------------------
     def _detect_superpixels(self, image_path: str, n_segments: int = 50):
+        from skimage.segmentation import slic
+        from skimage.io import imread
         import numpy as np
         from PIL import Image
         from skimage.segmentation import slic
@@ -395,14 +392,8 @@ class ImageDataset(CustomDataset):
 
         for seg_id in np.unique(segments):
             ys, xs = np.where(segments == seg_id)
-
-            if len(xs) == 0:
-                continue
-
-            x_min = int(xs.min())
-            x_max = int(xs.max()) + 1
-            y_min = int(ys.min())
-            y_max = int(ys.max()) + 1
+            x_min, x_max = xs.min(), xs.max()
+            y_min, y_max = ys.min(), ys.max()
 
             detections.append({
                 "class": "superpixel",
@@ -412,9 +403,8 @@ class ImageDataset(CustomDataset):
                     y_min * (area_y / h),
                     x_max * (area_x / w),
                     y_max * (area_y / h),
-                    area_x,
-                    area_y,
-                ),
+                    area_x, area_y
+                )
             })
 
         return detections
@@ -600,7 +590,8 @@ class TimeSeriesDataset(CustomDataset):
         # Build vertices as list of (x,y) pairs
         verts = [(float(x), float(y)) for x, y in zip(xs, ys)]
         # Slight smoothing: join with line segments
-        line = visual.ShapeStim(win=window, vertices=verts, closeShape=False, lineWidth=2.0, lineColor='black', fillColor=None)
+        line = visual.ShapeStim(win=window, vertices=verts, closeShape=False, lineWidth=2.0, lineColor='black',
+                                fillColor=None)
         line.draw()
         window.flip()
 
