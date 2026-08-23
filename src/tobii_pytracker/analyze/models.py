@@ -1329,7 +1329,7 @@ class VoiceTranscription(BaseAnalyzer):
     # TODO: Implement methods for concept definition and analysis.
 
 
-# BBOX stuff
+# BBOX stuff, todo change contract
 import ast
 import json
 from pathlib import Path
