@@ -43,7 +43,6 @@ class BaseAnalyzer:
         self.results.to_json(filepath, orient="records", indent=4, force_ascii=False)
 
 
-
 # ---------------------------------------------------------------------
 # ------------------------- ANALYZERS --------------------------------
 # ---------------------------------------------------------------------
@@ -88,9 +87,9 @@ class HeatmapAnalyzer:
     # ANALYSIS
     # ======================================================
     def analyze(
-        self,
-        background_data: pd.DataFrame,
-        per: str = "global",
+            self,
+            background_data: pd.DataFrame,
+            per: str = "global",
     ) -> pd.DataFrame:
         """
         Perform gaze heatmap analysis by aggregating gaze data per group.
@@ -148,17 +147,17 @@ class HeatmapAnalyzer:
     # VISUALIZATION
     # ======================================================
     def plot_analysis(
-        self,
-        background_data: pd.DataFrame,
-        screenshot_path: Path,
-        title: Optional[str] = None,
-        flip_y: bool = True,
-        blur_sigma: float = 3.0,
-        bins: int = 100,
-        cmap: str = "hot",
-        alpha: float = 0.6,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            background_data: pd.DataFrame,
+            screenshot_path: Path,
+            title: Optional[str] = None,
+            flip_y: bool = True,
+            blur_sigma: float = 3.0,
+            bins: int = 100,
+            cmap: str = "hot",
+            alpha: float = 0.6,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Plot gaze heatmap overlayed over the given screenshot.
@@ -196,7 +195,8 @@ class HeatmapAnalyzer:
 
         # --- Prepare gaze coordinates ---
         avg_x = W / 2 + background_data["avg_gaze_x"].dropna().values
-        avg_y = H / 2 - background_data["avg_gaze_y"].dropna().values if flip_y else H / 2 + background_data["avg_gaze_y"].dropna().values
+        avg_y = H / 2 - background_data["avg_gaze_y"].dropna().values if flip_y else H / 2 + background_data[
+            "avg_gaze_y"].dropna().values
 
         # --- Compute heatmap ---
         heatmap, _, _ = np.histogram2d(avg_x, avg_y, bins=bins, range=[[0, W], [0, H]])
@@ -256,9 +256,9 @@ class FocusMapAnalyzer:
     # ANALYSIS
     # ======================================================
     def analyze(
-        self,
-        background_data: pd.DataFrame,
-        per: str = "global",
+            self,
+            background_data: pd.DataFrame,
+            per: str = "global",
     ) -> pd.DataFrame:
         """
         Compute summary stats similarly to HeatmapAnalyzer but for API consistency.
@@ -312,17 +312,17 @@ class FocusMapAnalyzer:
     # VISUALIZATION (signature matches HeatmapAnalyzer.plot_analysis)
     # ======================================================
     def plot_analysis(
-        self,
-        background_data: pd.DataFrame,
-        screenshot_path: Path,
-        title: Optional[str] = None,
-        flip_y: bool = True,
-        blur_sigma: float = 3.0,
-        bins: int = 100,
-        cmap: str = "hot",
-        alpha: float = 0.6,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            background_data: pd.DataFrame,
+            screenshot_path: Path,
+            title: Optional[str] = None,
+            flip_y: bool = True,
+            blur_sigma: float = 3.0,
+            bins: int = 100,
+            cmap: str = "hot",
+            alpha: float = 0.6,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Plot focus map (inverted heatmap) overlayed over the screenshot.
@@ -411,14 +411,14 @@ class SaccadeAnalyzer:
     """
 
     def __init__(
-        self,
-        output_folder: Path,
-        method: Literal["ivt", "acceleration"] = "ivt",
-        velocity_threshold: float = 100.0,
-        acceleration_threshold: float = 5000.0,
-        min_duration: float = 0.01,
-        filter_micro_saccades: bool = False,
-        micro_saccade_threshold: float = 30.0,
+            self,
+            output_folder: Path,
+            method: Literal["ivt", "acceleration"] = "ivt",
+            velocity_threshold: float = 100.0,
+            acceleration_threshold: float = 5000.0,
+            min_duration: float = 0.01,
+            filter_micro_saccades: bool = False,
+            micro_saccade_threshold: float = 30.0,
     ):
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
@@ -470,7 +470,7 @@ class SaccadeAnalyzer:
             g = g.dropna(subset=["x_prev", "y_prev", "t_prev", "dt"])
             g["dt"] = g["dt"].replace(0, np.nan)
 
-            g["amplitude"] = np.sqrt(g["dx"]**2 + g["dy"]**2)
+            g["amplitude"] = np.sqrt(g["dx"] ** 2 + g["dy"] ** 2)
             g["velocity"] = g["amplitude"] / g["dt"]
             g["acceleration"] = g["velocity"].diff() / g["dt"]
 
@@ -505,8 +505,8 @@ class SaccadeAnalyzer:
                     continue
 
                 amp = np.sqrt(
-                    (seg["avg_gaze_x"].iloc[-1] - seg["x_prev"].iloc[0])**2 +
-                    (seg["avg_gaze_y"].iloc[-1] - seg["y_prev"].iloc[0])**2
+                    (seg["avg_gaze_x"].iloc[-1] - seg["x_prev"].iloc[0]) ** 2 +
+                    (seg["avg_gaze_y"].iloc[-1] - seg["y_prev"].iloc[0]) ** 2
                 )
 
                 # Optional micro-saccade filtering
@@ -545,18 +545,18 @@ class SaccadeAnalyzer:
     # VISUALIZATION
     # ======================================================
     def plot_analysis(
-        self,
-        saccades: pd.DataFrame,
-        screenshot_path: Path,
-        set_name: Optional[str] = None,
-        slide_index: Optional[int] = None,
-        title: Optional[str] = None,
-        flip_y: bool = True,
-        color: str = "cyan",
-        alpha: float = 0.8,
-        linewidth: float = 2.0,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            saccades: pd.DataFrame,
+            screenshot_path: Path,
+            set_name: Optional[str] = None,
+            slide_index: Optional[int] = None,
+            title: Optional[str] = None,
+            flip_y: bool = True,
+            color: str = "cyan",
+            alpha: float = 0.8,
+            linewidth: float = 2.0,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Overlay saccades on top of the screenshot.
@@ -629,7 +629,6 @@ class SaccadeAnalyzer:
             plt.close(fig)
 
 
-
 class FixationAnalyzer:
     """
     Detects and visualizes gaze fixations from time-series gaze data.
@@ -656,12 +655,12 @@ class FixationAnalyzer:
     """
 
     def __init__(
-        self,
-        output_folder: Path,
-        method: Literal["dispersion", "velocity"] = "dispersion",
-        dispersion_threshold: float = 50.0,
-        min_duration: float = 0.1,
-        velocity_threshold: float = 100.0,
+            self,
+            output_folder: Path,
+            method: Literal["dispersion", "velocity"] = "dispersion",
+            dispersion_threshold: float = 50.0,
+            min_duration: float = 0.1,
+            velocity_threshold: float = 100.0,
     ):
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
@@ -768,7 +767,7 @@ class FixationAnalyzer:
         g["dx"] = g["avg_gaze_x"].diff()
         g["dy"] = g["avg_gaze_y"].diff()
         g["dt"] = g["system_time"].diff()
-        g["velocity"] = np.sqrt(g["dx"]**2 + g["dy"]**2) / g["dt"]
+        g["velocity"] = np.sqrt(g["dx"] ** 2 + g["dy"] ** 2) / g["dt"]
         g["is_fix"] = g["velocity"] < self.velocity_threshold
 
         fixations = []
@@ -804,18 +803,18 @@ class FixationAnalyzer:
     # VISUALIZATION
     # ======================================================
     def plot_analysis(
-        self,
-        fixations: pd.DataFrame,
-        screenshot_path: Path,
-        set_name: Optional[str] = None,
-        slide_index: Optional[int] = None,
-        title: Optional[str] = None,
-        flip_y: bool = True,
-        color: str = "yellow",
-        alpha: float = 0.7,
-        size_scale: float = 2000.0,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            fixations: pd.DataFrame,
+            screenshot_path: Path,
+            set_name: Optional[str] = None,
+            slide_index: Optional[int] = None,
+            title: Optional[str] = None,
+            flip_y: bool = True,
+            color: str = "yellow",
+            alpha: float = 0.7,
+            size_scale: float = 2000.0,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Overlay fixations on a slide image.
@@ -881,8 +880,6 @@ class FixationAnalyzer:
             plt.close(fig)
 
 
-
-
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -913,11 +910,11 @@ class EntropyAnalyzer:
     # ANALYSIS
     # ======================================================
     def analyze(
-        self,
-        background_data: pd.DataFrame,
-        per: str = "slide",
-        bins: int = 100,
-        use_convex_hull: bool = True,
+            self,
+            background_data: pd.DataFrame,
+            per: str = "slide",
+            bins: int = 100,
+            use_convex_hull: bool = True,
     ) -> pd.DataFrame:
         """
         Compute spatial entropy of gaze distributions.
@@ -997,17 +994,17 @@ class EntropyAnalyzer:
     # VISUALIZATION
     # ======================================================
     def plot_analysis(
-        self,
-        background_data: pd.DataFrame,
-        screenshot_path: Path,
-        title: Optional[str] = None,
-        flip_y: bool = True,
-        bins: int = 100,
-        blur_sigma: float = 3.0,
-        cmap: str = "hot",
-        alpha: float = 0.6,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            background_data: pd.DataFrame,
+            screenshot_path: Path,
+            title: Optional[str] = None,
+            flip_y: bool = True,
+            bins: int = 100,
+            blur_sigma: float = 3.0,
+            cmap: str = "hot",
+            alpha: float = 0.6,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Visualize gaze entropy overlayed on an image (heatmap + convex hull).
@@ -1045,7 +1042,8 @@ class EntropyAnalyzer:
 
         # Convert coordinates
         xs = W / 2 + background_data["avg_gaze_x"].dropna().values
-        ys = H / 2 - background_data["avg_gaze_y"].dropna().values if flip_y else H / 2 + background_data["avg_gaze_y"].dropna().values
+        ys = H / 2 - background_data["avg_gaze_y"].dropna().values if flip_y else H / 2 + background_data[
+            "avg_gaze_y"].dropna().values
 
         # Compute heatmap for visualization
         heatmap, _, _ = np.histogram2d(xs, ys, bins=bins, range=[[0, W], [0, H]])
@@ -1080,7 +1078,6 @@ class EntropyAnalyzer:
             plt.show()
         else:
             plt.close(fig)
-
 
 
 import numpy as np
@@ -1121,13 +1118,13 @@ class ClusterAnalyzer:
     """
 
     def __init__(
-        self,
-        output_folder: Path,
-        columns: Optional[List[str]] = None,
-        clustering_model: Optional[object] = None,
-        eps: float = 0.05,
-        min_samples: int = 5,
-        n_clusters: Optional[int] = None,
+            self,
+            output_folder: Path,
+            columns: Optional[List[str]] = None,
+            clustering_model: Optional[object] = None,
+            eps: float = 0.05,
+            min_samples: int = 5,
+            n_clusters: Optional[int] = None,
     ):
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
@@ -1143,12 +1140,12 @@ class ClusterAnalyzer:
     # ANALYSIS
     # ======================================================
     def analyze(
-        self,
-        data: pd.DataFrame,
-        clustering_model: Optional[object] = None,
-        eps: Optional[float] = None,
-        min_samples: Optional[int] = None,
-        n_clusters: Optional[int] = None,
+            self,
+            data: pd.DataFrame,
+            clustering_model: Optional[object] = None,
+            eps: Optional[float] = None,
+            min_samples: Optional[int] = None,
+            n_clusters: Optional[int] = None,
     ) -> pd.DataFrame:
         """
         Perform clustering on gaze coordinates.
@@ -1206,18 +1203,18 @@ class ClusterAnalyzer:
     # VISUALIZATION
     # ======================================================
     def plot_analysis(
-        self,
-        background_data: pd.DataFrame,
-        screenshot_path: Path,
-        title: Optional[str] = None,
-        set_name: Optional[str] = None,
-        slide_index: Optional[int] = None,
-        flip_y: bool = True,
-        alpha: float = 0.7,
-        point_size: float = 30.0,
-        show_noise: bool = True,
-        show: bool = True,
-        save_path: Optional[Path] = None,
+            self,
+            background_data: pd.DataFrame,
+            screenshot_path: Path,
+            title: Optional[str] = None,
+            set_name: Optional[str] = None,
+            slide_index: Optional[int] = None,
+            flip_y: bool = True,
+            alpha: float = 0.7,
+            point_size: float = 30.0,
+            show_noise: bool = True,
+            show: bool = True,
+            save_path: Optional[Path] = None,
     ):
         """
         Visualize gaze points colored by cluster assignment.
@@ -1289,7 +1286,6 @@ class ClusterAnalyzer:
             plt.close(fig)
 
 
-
 class ConceptAnalyzer(BaseAnalyzer):
     """
     Defines AOI-like (Areas of Interest) concepts from clusters
@@ -1306,7 +1302,8 @@ class ConceptAnalyzer(BaseAnalyzer):
     def __init__(self, background_data: pd.DataFrame):
         super().__init__(background_data)
 
-    #TODO: Implement methods for concept definition and analysis.
+    # TODO: Implement methods for concept definition and analysis.
+
 
 class ScanpathsAnalyzer(BaseAnalyzer):
     """
@@ -1316,8 +1313,8 @@ class ScanpathsAnalyzer(BaseAnalyzer):
 
     def __init__(self, background_data: pd.DataFrame):
         super().__init__(background_data)
-    #TODO: Implement methods for concept definition and analysis.
-   
+    # TODO: Implement methods for concept definition and analysis.
+
 
 class VoiceTranscription(BaseAnalyzer):
     """
@@ -1329,8 +1326,7 @@ class VoiceTranscription(BaseAnalyzer):
 
     def __init__(self, background_data: pd.DataFrame):
         super().__init__(background_data)
-    #TODO: Implement methods for concept definition and analysis.
-    
+    # TODO: Implement methods for concept definition and analysis.
 
 
 # BBOX stuff
