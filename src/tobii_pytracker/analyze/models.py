@@ -1347,33 +1347,12 @@ import pandas as pd
 
 
 class BBoxAttentionAnalyzer:
-    """
-    Maps gaze/fixation points to generated image bounding boxes.
-
-    Expected bbox format:
-        {
-            "class": "superpixel",
-            "conf": 1.0,
-            "bbox": {
-                "cx": ...,
-                "cy": ...,
-                "w": ...,
-                "h": ...
-            }
-        }
-
-    Coordinates are expected to be centered screen/AOI coordinates:
-        x = 0, y = 0 is image center.
-    """
 
     def __init__(self, output_folder: Path):
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.results: Optional[pd.DataFrame] = None
 
-    # ------------------------------------------------------------
-    # Parsing helpers
-    # ------------------------------------------------------------
     @staticmethod
     def _parse_objects_bboxes(value: Any) -> Dict[str, Any]:
         if isinstance(value, dict):
@@ -1413,38 +1392,12 @@ class BBoxAttentionAnalyzer:
             and edges["y_min"] <= y <= edges["y_max"]
         )
 
-    # ------------------------------------------------------------
-    # Main analysis
-    # ------------------------------------------------------------
     def analyze(
         self,
         raw_data: pd.DataFrame,
         gaze_data: pd.DataFrame,
         use_fixations: bool = False,
     ) -> pd.DataFrame:
-        """
-        Score every bbox by the gaze/fixation points that fall inside it.
-
-        Parameters
-        ----------
-        raw_data:
-            Non-flattened data from DataLoader.get_all_data(flatten=False).
-            Must contain objects_bboxes, screenshot_file, set_name/slide_index or row index.
-
-        gaze_data:
-            Flattened gaze/fixation data.
-            Must contain avg_gaze_x, avg_gaze_y, set_name, slide_index.
-
-        use_fixations:
-            If True, expects fixation-style columns:
-            x_mean, y_mean, duration.
-            If False, uses raw gaze columns:
-            avg_gaze_x, avg_gaze_y.
-
-        Returns
-        -------
-        DataFrame with one row per bbox and attention metrics.
-        """
         records = []
 
         if "set_name" not in raw_data.columns:
@@ -1552,28 +1505,10 @@ class BBoxAttentionAnalyzer:
         self.results = result
         return result
 
-    # ------------------------------------------------------------
-    # Summary metrics
-    # ------------------------------------------------------------
     def evaluate(
             self,
             scored_bboxes: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        """
-        Compute per-slide bbox/gaze metrics.
-
-        Notes
-        -----
-        bbox_hit_count:
-            Total number of gaze-to-bbox memberships. A gaze point may be
-            counted more than once when bounding boxes overlap.
-
-        unique_gaze_hit_count:
-            Number of distinct gaze points contained in at least one bbox.
-
-        coverage_by_bboxes:
-            Unique gaze coverage, always between 0 and 1.
-        """
         df = scored_bboxes if scored_bboxes is not None else self.results
 
         if df is None or df.empty:
@@ -1588,11 +1523,8 @@ class BBoxAttentionAnalyzer:
             bbox_count = len(group)
             attended_bboxes = int((group["hit_count"] > 0).sum())
 
-            # May exceed total_points because overlapping rectangles can
-            # contain the same gaze point.
             total_bbox_memberships = int(group["hit_count"].sum())
 
-            # Union of gaze samples covered by at least one bbox.
             unique_hit_indices = set()
 
             if "hit_gaze_indices" in group.columns:
@@ -1626,16 +1558,12 @@ class BBoxAttentionAnalyzer:
                 ),
                 "total_gaze_points": total_points,
 
-                # Total memberships; may exceed total_gaze_points.
                 "bbox_hit_count": total_bbox_memberships,
 
-                # Distinct gaze samples covered by at least one bbox.
                 "unique_gaze_hit_count": unique_gaze_hit_count,
 
-                # Correct bounded coverage metric.
                 "coverage_by_bboxes": unique_coverage,
 
-                # Shows how much bbox overlap affects counting.
                 "overlap_factor": overlap_factor,
 
                 "max_attention_score": float(
@@ -1648,9 +1576,6 @@ class BBoxAttentionAnalyzer:
 
         return pd.DataFrame(grouped)
 
-    # ------------------------------------------------------------
-    # Visualization
-    # ------------------------------------------------------------
     def plot_analysis(
             self,
             scored_bboxes: pd.DataFrame,
@@ -1665,15 +1590,6 @@ class BBoxAttentionAnalyzer:
             show: bool = True,
             save_path: Optional[Path] = None,
     ):
-        """
-        Plot screenshot, attended bboxes and gaze samples.
-
-        Filtering follows the same convention as FixationAnalyzer and
-        SaccadeAnalyzer: set_name and slide_index are optional filters.
-
-        The caller remains responsible for providing the screenshot that
-        corresponds to the selected set and slide.
-        """
         screenshot_path = Path(screenshot_path)
 
         if not screenshot_path.exists():
@@ -1731,7 +1647,6 @@ class BBoxAttentionAnalyzer:
         fig, ax = plt.subplots(figsize=(10, 6))
         ax.imshow(img, origin="upper")
 
-        # Raw gaze samples: blue dots.
         if show_gaze and not slide_gaze.empty:
             gaze_x = (
                     width / 2.0
@@ -1758,7 +1673,6 @@ class BBoxAttentionAnalyzer:
             bbox_width = float(row["w"])
             bbox_height = float(row["h"])
 
-            # Centered PsychoPy coordinates -> image coordinates.
             x_min = width / 2.0 + (cx - bbox_width / 2.0)
             y_min = height / 2.0 - (cy + bbox_height / 2.0)
 

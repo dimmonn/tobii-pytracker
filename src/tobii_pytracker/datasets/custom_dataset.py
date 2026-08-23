@@ -3,17 +3,13 @@ import os
 import random
 import math
 import importlib
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 import numpy as np
 import pandas as pd
 from psychopy import visual
 from PIL import Image
 
-from tobii_pytracker.utils.bbox_generator import (
-    ImageBoundingBoxGenerator,
-    bbox_from_top_left,
-)
 from tobii_pytracker.utils.custom_logger import CustomLogger
 
 
@@ -28,7 +24,17 @@ def _to_centered_bbox_from_tl(x_min_px: float, y_min_px: float, x_max_px: float,
 
     Returns dict: {"cx":..., "cy":..., "w":..., "h":...} in pixels (not normalized).
     """
-    return bbox_from_top_left(x_min_px, y_min_px, x_max_px, y_max_px, area_x, area_y)
+    w_px = max(1.0, x_max_px - x_min_px)
+    h_px = max(1.0, y_max_px - y_min_px)
+    x_center_px = x_min_px + w_px / 2.0
+    y_center_px = y_min_px + h_px / 2.0
+
+    # center-origin
+    cx = x_center_px - (area_x / 2.0)
+    # convert y: top-left -> center-origin with positive-up
+    cy = (area_y / 2.0) - y_center_px
+
+    return {"cx": float(cx), "cy": float(cy), "w": float(w_px), "h": float(h_px)}
 
 
 def _image_load_size(path: str) -> Tuple[int, int]:
@@ -78,6 +84,7 @@ class TextDataset(CustomDataset):
         super().__init__(config, calculate_bboxes)
         self.text_cfg = self.config.get_text_dataset_config()
         self.font_height = int(self.text_cfg.get("font_height", 35))
+        # fraction of AOI width used for wrap (leave small margins)
         self.wrap_frac: float = float(self.text_cfg.get("wrap_fraction", 0.95))
         self._load_data()
 
@@ -93,42 +100,54 @@ class TextDataset(CustomDataset):
                      for _, r in df.iterrows()]
 
     def draw_stimulus(self, window: visual.Window, sample: Dict[str, Any]) -> Dict[str, Any]:
-        """Draw text into provided PsychoPy window and compute per-line & per-word bboxes."""
+        """
+        Draw text into provided PsychoPy window and compute per-line & per-word bboxes.
+        Returns dict with 'words' and 'lines' lists of bbox dicts.
+        """
         text = str(sample["data"])
         area_x, area_y = self.config.get_area_of_interest_size()
         wrap_width = int(area_x * self.wrap_frac)
 
+        # Draw full paragraph so participant sees exactly the rendering
         paragraph = visual.TextStim(
             win=window,
             text=text,
             pos=(0, 0),
             height=self.font_height,
             wrapWidth=wrap_width,
-            alignText="left",
+            alignText="left",   # we'll center the block ourselves by computing left offset
             color="white"
         )
         paragraph.draw()
         window.flip()
 
+        # Prepare measurement: measure each word width/height using same window/font
+        # We do NOT create a temporary window; we use the same 'window'.
+        # Split into explicit lines first (respect \n in text)
+        # We'll reflow words into lines using measured widths and wrap_width (PsychoPy's wrapWidth)
         raw_lines = text.split("\n")
         words_all = []
         for rl in raw_lines:
             for w in rl.split():
                 words_all.append(w)
 
+        # measure widths/heights
         word_dims: List[Tuple[str, float, float]] = []
         for w in words_all:
             ts = visual.TextStim(win=window, text=w, height=self.font_height, wrapWidth=None)
             w_w, w_h = ts.boundingBox
             word_dims.append((w, float(w_w), float(w_h)))
 
+        # space width
         space_ts = visual.TextStim(win=window, text=" ", height=self.font_height)
         space_w = float(space_ts.boundingBox[0] or (self.font_height * 0.3))
 
+        # Reflow words into lines using measured widths and wrap_width
         lines: List[List[Tuple[str, float, float]]] = []
         cur_line: List[Tuple[str, float, float]] = []
         cur_width = 0.0
-        for w, w_w, w_h in word_dims:
+        iter_words = iter(word_dims)
+        for w, w_w, w_h in iter_words:
             add_w = w_w if cur_width == 0 else (space_w + w_w)
             if cur_width + add_w <= wrap_width or cur_width == 0:
                 cur_line.append((w, w_w, w_h))
@@ -140,10 +159,12 @@ class TextDataset(CustomDataset):
         if cur_line:
             lines.append(cur_line)
 
+        # compute line heights and total height
         line_heights = [max((h for (_, _, h) in line), default=self.font_height) for line in lines]
         total_text_height = sum(line_heights)
-        top_y = (area_y - total_text_height) / 2.0
+        top_y = (area_y - total_text_height) / 2.0  # top coordinate (px, top-left origin)
 
+        # compute line widths to center each line horizontally
         line_widths = []
         for line in lines:
             lw = 0.0
@@ -153,6 +174,7 @@ class TextDataset(CustomDataset):
                     lw += space_w
             line_widths.append(lw)
 
+        # Build line and word bboxes (pixel coords top-left origin), then convert to centered coords
         words_out: List[Dict[str, Any]] = []
         lines_out: List[Dict[str, Any]] = []
         y_cursor = top_y
@@ -160,58 +182,88 @@ class TextDataset(CustomDataset):
         for li, line in enumerate(lines):
             lw = line_widths[li]
             line_h = line_heights[li]
-            left_x = (area_x - lw) / 2.0
+            left_x = (area_x - lw) / 2.0  # left x to center the line in AOI
+            line_x_min = left_x
+            line_x_max = left_x + lw
+            line_y_min = y_cursor
+            line_y_max = y_cursor + line_h
 
-            line_bbox_centered = _to_centered_bbox_from_tl(left_x, y_cursor, left_x + lw, y_cursor + line_h, area_x, area_y)
+            line_bbox_centered = _to_centered_bbox_from_tl(line_x_min, line_y_min, line_x_max, line_y_max, area_x, area_y)
             lines_out.append({
                 "text": " ".join([w for (w, _, _) in line]),
                 "conf": 1.0,
                 "bbox": line_bbox_centered
             })
 
+            # words
             x_cursor = left_x
             for word, w_w, w_h in line:
+                w_x_min = x_cursor
+                w_x_max = x_cursor + w_w
+                # center vertically in the line
                 w_y_min = y_cursor + (line_h - w_h) / 2.0
-                word_bbox_centered = _to_centered_bbox_from_tl(x_cursor, w_y_min, x_cursor + w_w, w_y_min + w_h, area_x, area_y)
-                words_out.append({"word": word, "conf": 1.0, "bbox": word_bbox_centered})
+                w_y_max = w_y_min + w_h
+
+                word_bbox_centered = _to_centered_bbox_from_tl(w_x_min, w_y_min, w_x_max, w_y_max, area_x, area_y)
+                words_out.append({
+                    "word": word,
+                    "conf": 1.0,
+                    "bbox": word_bbox_centered
+                })
+
                 x_cursor += w_w + space_w
 
             y_cursor += line_h
 
         return {"words": words_out, "lines": lines_out}
 
-
 class ImageDataset(CustomDataset):
     """
-    Image dataset that draws images and computes AOI-aligned bounding boxes.
+    Image dataset that draws images and computes bounding boxes.
 
-    Bboxes are calculated against the same AOI size used for the cropped screenshot,
-    so gaze points and object/region boxes share one coordinate system.
+    - Does NOT accept a model directly.
+    - If config contains a bbox model, it is loaded automatically.
+    - If not, fallback AOI detection (grid/superpixel/saliency) is used.
+
+    This keeps the dataset completely model-agnostic.
     """
 
-    def __init__(self, config: Any, calculate_bboxes: bool = True):
+    def __init__(self, config: Any, calculate_bboxes: bool = False):
         super().__init__(config, calculate_bboxes)
-        self.image_cfg = self.config.get_image_dataset_config()
-        self.default_detector = self.image_cfg.get("bbox_model", "superpixel")
+
         self.model = None
+        self.default_detector = None
 
         if self.calculate_bboxes:
+            image_config = self.config.get_image_dataset_config()
+            self.default_detector = image_config.get("bbox_model", "grid")
+
+        if self.calculate_bboxes and "bbox_model" in self.config.config:
             try:
                 cfg = self.config.get_bbox_model_config()
+
                 ModelClass = getattr(
-                    importlib.import_module(f"{cfg['folder']}.{cfg['module']}"),
-                    cfg['class']
+                    importlib.import_module(
+                        f"{cfg['folder']}.{cfg['module']}"
+                    ),
+                    cfg["class"],
                 )
+
                 self.model = ModelClass(config, self)
-            except Exception as e:
+
+            except Exception as exc:
                 self.logger.warning(
-                    f"No valid custom bbox model found in config; using fallback detector "
-                    f"({self.default_detector}). Error: {e}"
+                    f"Could not load custom bbox model; "
+                    f"using fallback detector ({self.default_detector}). "
+                    f"Error: {exc}"
                 )
                 self.model = None
 
         self._load_data()
 
+    # ------------------------------------------------------------------
+    # Loading data
+    # ------------------------------------------------------------------
     def _load_data(self):
         self.classes = [
             d for d in os.listdir(self.dataset_path)
@@ -230,18 +282,25 @@ class ImageDataset(CustomDataset):
                     if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
                         full_path = os.path.join(root, f)
                         sample = {"class": class_name, "data": full_path}
+
                         if self.calculate_bboxes:
                             sample["bboxes"] = self._compute_image_bboxes(full_path)
+
                         samples.append(sample)
 
         random.shuffle(samples)
         self.data = samples
 
+    # ------------------------------------------------------------------
+    # Choose between model or fallback methods
+    # ------------------------------------------------------------------
     def _compute_image_bboxes(self, image_path: str) -> List[Dict[str, Any]]:
         if self.model is not None:
             return self._compute_bboxes_with_model(image_path)
-        return self._compute_bboxes_fallback(image_path)
+        else:
+            return self._compute_bboxes_fallback(image_path)
 
+    # ------------------------------------------------------------------
     def _compute_bboxes_with_model(self, image_path: str):
         """Handles model inference + AOI rescaling."""
         area_x, area_y = self.config.get_area_of_interest_size()
@@ -268,24 +327,139 @@ class ImageDataset(CustomDataset):
 
         return detections_out
 
+    # ------------------------------------------------------------------
+    # Fallback detection (grid, superpixel, saliency)
+    # ------------------------------------------------------------------
     def _compute_bboxes_fallback(self, image_path: str):
-        area_x, area_y = self.config.get_area_of_interest_size()
-        generator = ImageBoundingBoxGenerator((area_x, area_y), method=self.default_detector)
-        return generator.generate(image_path)
+        method = self.default_detector
 
+        if method == "grid":
+            return self._detect_grid(image_path)
+        elif method == "superpixel":
+            return self._detect_superpixels(image_path)
+        elif method == "saliency":
+            return self._detect_saliency(image_path)
+
+        self.logger.error(f"Unknown fallback detection method '{method}'. Returning empty list.")
+        return []
+
+    # ------------------------------------------------------------------
+    # GRID fallback
+    # ------------------------------------------------------------------
     def _detect_grid(self, image_path: str, grid_x: int = 3, grid_y: int = 3):
         area_x, area_y = self.config.get_area_of_interest_size()
-        return ImageBoundingBoxGenerator((area_x, area_y), method="grid").grid(grid_x=grid_x, grid_y=grid_y)
+        cell_w = area_x / grid_x
+        cell_h = area_y / grid_y
 
+        detections = []
+        for i in range(grid_x):
+            for j in range(grid_y):
+                x_min, y_min = i * cell_w, j * cell_h
+                x_max, y_max = x_min + cell_w, y_min + cell_h
+
+                detections.append({
+                    "class": "grid",
+                    "conf": 1.0,
+                    "bbox": _to_centered_bbox_from_tl(
+                        x_min, y_min, x_max, y_max,
+                        area_x, area_y
+                    )
+                })
+        return detections
+
+    # ------------------------------------------------------------------
+    # SUPERPIXEL fallback
+    # ------------------------------------------------------------------
     def _detect_superpixels(self, image_path: str, n_segments: int = 50):
-        area_x, area_y = self.config.get_area_of_interest_size()
-        return ImageBoundingBoxGenerator((area_x, area_y), method="superpixel").superpixels(image_path, target_regions=n_segments)
+        import numpy as np
+        from PIL import Image
+        from skimage.segmentation import slic
 
+        area_x, area_y = self.config.get_area_of_interest_size()
+
+        with Image.open(image_path) as pil_image:
+            pil_image.seek(0)
+            img = np.asarray(pil_image.convert("RGB"))
+
+        h, w = img.shape[:2]
+
+        segments = slic(
+            img,
+            n_segments=n_segments,
+            compactness=10,
+            start_label=0,
+            channel_axis=-1,
+        )
+
+        detections = []
+
+        for seg_id in np.unique(segments):
+            ys, xs = np.where(segments == seg_id)
+
+            if len(xs) == 0:
+                continue
+
+            x_min = int(xs.min())
+            x_max = int(xs.max()) + 1
+            y_min = int(ys.min())
+            y_max = int(ys.max()) + 1
+
+            detections.append({
+                "class": "superpixel",
+                "conf": 1.0,
+                "bbox": _to_centered_bbox_from_tl(
+                    x_min * (area_x / w),
+                    y_min * (area_y / h),
+                    x_max * (area_x / w),
+                    y_max * (area_y / h),
+                    area_x,
+                    area_y,
+                ),
+            })
+
+        return detections
+
+    # ------------------------------------------------------------------
+    # SALIENCY fallback
+    # ------------------------------------------------------------------
     def _detect_saliency(self, image_path: str, threshold: float = 0.6):
-        area_x, area_y = self.config.get_area_of_interest_size()
-        percentile = max(0.0, min(100.0, threshold * 100.0))
-        return ImageBoundingBoxGenerator((area_x, area_y), method="contrast").contrast(image_path, percentile=percentile)
+        import cv2
+        import numpy as np
 
+        area_x, area_y = self.config.get_area_of_interest_size()
+
+        img = cv2.imread(image_path)
+        h, w = img.shape[:2]
+
+        sal = cv2.saliency.StaticSaliencyFineGrained_create()
+        success, sal_map = sal.computeSaliency(img)
+        sal_bin = (sal_map > threshold).astype(np.uint8)
+
+        contours, _ = cv2.findContours(sal_bin, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        detections = []
+        for cnt in contours:
+            x_min, y_min, width, height = cv2.boundingRect(cnt)
+            x_max = x_min + width
+            y_max = y_min + height
+
+            detections.append({
+                "class": "saliency",
+                "conf": 1.0,
+                "bbox": _to_centered_bbox_from_tl(
+                    x_min * (area_x / w),
+                    y_min * (area_y / h),
+                    x_max * (area_x / w),
+                    y_max * (area_y / h),
+                    area_x, area_y
+                )
+            })
+
+        return detections
+
+    # ------------------------------------------------------------------
+    # Drawing
+    # ------------------------------------------------------------------
     def draw_stimulus(self, window: visual.Window, sample: Dict[str, Any]) -> Dict[str, Any]:
         area_x, area_y = self.config.get_area_of_interest_size()
         img_path = sample["data"]
@@ -306,9 +480,9 @@ class ImageDataset(CustomDataset):
 # -------------------------
 class TimeSeriesDataset(CustomDataset):
     """
-    Time series dataset: CSV rows are: index, v1, v2, ..., vN, class.
-    draw_stimulus draws the time series as a polyline in the AOI and returns
-    per-timestamp or per-window bboxes in center-origin pixel coordinates.
+    Time series dataset: CSV rows are: index, v1, v2, ..., vN, class
+    draw_stimulus draws the time series as a polyline in the AOI and returns per-timestamp or per-window bboxes.
+    Bboxes are center-origin pixel coords (cx,cy,w,h) where cx,cy are in pixels relative to AOI center.
     """
 
     def __init__(self, config: Any, calculate_bboxes: bool = False, window_size: int = 1):
@@ -333,36 +507,55 @@ class TimeSeriesDataset(CustomDataset):
         self.data = samples
 
     def _compute_timeseries_bboxes_from_series(self, series: np.ndarray) -> List[Dict[str, Any]]:
+        """
+        Create bboxes per timestamp OR binned by window_size.
+        Each bbox is a vertical slice centered at the x position of the timestamp(s) and spanning a fraction of AOI height.
+        """
         area_x, area_y = self.config.get_area_of_interest_size()
         n = len(series)
         if n == 0:
             return []
 
+        # map series y-values to AOI vertical pixel coordinates.
+        # Normalize series to [0,1] by min/max (if constant, make it centered)
         min_v, max_v = float(np.min(series)), float(np.max(series))
         if math.isclose(min_v, max_v):
+            # flat series — center it
             norm_vals = np.full_like(series, 0.5, dtype=float)
         else:
             norm_vals = (series - min_v) / (max_v - min_v)
 
-        xs = np.linspace(0, area_x, n, endpoint=False) + (area_x / (2 * n))
+        # x pixel positions across AOI (spread uniformly across width)
+        # we choose n points from x = 0..(n-1) mapped across area_x
+        xs = np.linspace(0, area_x, n, endpoint=False) + (area_x / (2 * n))  # center each bin
         bboxes_out: List[Dict[str, Any]] = []
 
+        # produce per-window bboxes
         for start in range(0, n, self.window_size):
             end = min(start + self.window_size, n)
             xs_window = xs[start:end]
             ys_window = norm_vals[start:end]
-            x_min_px = float(xs_window.min() - (area_x / (2 * n)))
-            x_max_px = float(xs_window.max() + (area_x / (2 * n)))
+            # compute bounding x-range in pixels for this window
+            x_min_px = float(xs_window.min() - (area_x / (2 * n)))  # leftmost edge of first bin
+            x_max_px = float(xs_window.max() + (area_x / (2 * n)))  # rightmost edge of last bin
+
+            # compute a representative y range: use min and max of values in window (map to pixels)
+            # map norm_vals where 0 => top? we want y positive up, but top-left y used below then converted
+            # For consistency we compute pixel y (top-left origin): y_px = (1 - norm) * area_y
             y_pixels = (1.0 - ys_window) * area_y
             y_min_px = float(y_pixels.min())
             y_max_px = float(y_pixels.max())
 
+            # Expand vertical span a bit to cover area near points (optional)
             pad_v = max(1.0, 0.02 * area_y)
             y_min_px = max(0.0, y_min_px - pad_v)
             y_max_px = min(area_y - 1.0, y_max_px + pad_v)
+
+            # Ensure inside area
             x_min_px = max(0.0, x_min_px)
             x_max_px = min(area_x - 1.0, x_max_px)
 
+            # convert to centered bbox
             bbox_centered = _to_centered_bbox_from_tl(x_min_px, y_min_px, x_max_px, y_max_px, area_x, area_y)
             bboxes_out.append({
                 "start_idx": int(start),
@@ -373,32 +566,46 @@ class TimeSeriesDataset(CustomDataset):
         return bboxes_out
 
     def draw_stimulus(self, window: visual.Window, sample: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Draw time series as polyline into window. Return dict {'timeseries_bboxes': [...]}
+        where each bbox has start_idx,end_idx,bbox center-origin.
+        """
         series = np.asarray(sample["data"], dtype=float)
         area_x, area_y = self.config.get_area_of_interest_size()
         n = len(series)
         if n == 0:
             return {"timeseries_bboxes": []}
 
+        # Normalize series for plotting vertically into AOI
         min_v, max_v = float(series.min()), float(series.max())
         if math.isclose(min_v, max_v):
             norm_vals = np.full(n, 0.5, dtype=float)
         else:
             norm_vals = (series - min_v) / (max_v - min_v)
 
+        # build points in PsychoPy coordinates (center-origin)
         xs = []
         ys = []
         for i, v in enumerate(norm_vals):
-            x_px = (i + 0.5) * (area_x / n)
+            # x position: map i to [-area_x/2 .. area_x/2]
+            x_px = (i + 0.5) * (area_x / n)  # top-left origin x (0..area_x)
             x_centered = x_px - (area_x / 2.0)
+            # y px in top-left origin: y_px = (1 - v) * area_y
             y_px = (1.0 - v) * area_y
             y_centered = (area_y / 2.0) - y_px
             xs.append(x_centered)
             ys.append(y_centered)
 
+        # Draw polyline using visual.ShapeStim (faster than many small Rects)
+        # Build vertices as list of (x,y) pairs
         verts = [(float(x), float(y)) for x, y in zip(xs, ys)]
+        # Slight smoothing: join with line segments
         line = visual.ShapeStim(win=window, vertices=verts, closeShape=False, lineWidth=2.0, lineColor='black', fillColor=None)
         line.draw()
         window.flip()
 
+        # compute bboxes (based on pixel positions with top-left origin)
+        # we reuse the helper that expects top-left coords, so reconstruct top-left x,y in px
+        # For each bin/window, compute x_min_px..x_max_px in top-left coords and y_min..y_max
         bboxes = self._compute_timeseries_bboxes_from_series(series)
         return {"timeseries_bboxes": bboxes}

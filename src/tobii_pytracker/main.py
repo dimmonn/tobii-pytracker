@@ -342,7 +342,7 @@ def cli():
     parser = argparse.ArgumentParser()
     parser = argparse.ArgumentParser()
     parser.add_argument('--config_file', type=str, default='configs/config.yaml', help='Path to YAML script config file')
-    parser.add_argument('--eyetracker_config_file', type=str, default='/Users/dima/tobii/tobii-pytracker/configs/mouse_eyetracker_config.yaml', help='Path to YAML eyetracker config file')
+    parser.add_argument('--eyetracker_config_file', type=str, default='./configs/mouse_eyetracker_config.yaml', help='Path to YAML eyetracker config file')
 
     # Boolean flags
     parser.add_argument('--enable_eyetracker', action='store_true', help='Launch script with launchHubServer (needs connected eyetracker if set)')

@@ -5,6 +5,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src
 ENV MPLBACKEND=Agg
 ENV PIP_NO_CACHE_DIR=1
+ENV DISPLAY=:99
 
 WORKDIR /app
 
@@ -37,6 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     xvfb \
     xauth \
+    x11vnc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-docker.txt /app/requirements-docker.txt

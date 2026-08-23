@@ -49,12 +49,10 @@ def launch_hub_server(eyetracker_config_file, window):
 
     io = launchHubServer(**iohub_config, window=window)
     tracker = io.devices.tracker
-
-    if not is_mouse_eyetracker(iohub_config):
-        result = tracker.runSetupProcedure()
-        LOGGER.debug(result)
-
+    r = tracker.runSetupProcedure()
+    LOGGER.debug(r)
     tracker.setRecordingState(True)
+
     return io, tracker
 
 def poll_tracker_events(tracker, buffer, last_event_id=0):
@@ -223,30 +221,16 @@ def is_mouse_eyetracker(iohub_config: dict) -> bool:
     return "mouse" in tracker_class.lower()
 
 
-def get_mouse_move_button_idx(
-    iohub_config: dict,
-    default: str = "RIGHT_BUTTON",
-) -> int:
+def get_mouse_move_button_idx(iohub_config: dict, default="RIGHT_BUTTON") -> int:
     """
-    Return PsychoPy mouse-button index:
-    0 = left, 1 = middle, 2 = right.
-
-    Returns -1 when MouseGaze uses CONTINUOUS mode.
+    Read the move button for the mouse eyetracker from iohub_config.
+    Returns PsychoPy button index (0=left, 1=middle, 2=right).
     """
     tracker_class = get_tracker_class(iohub_config)
     tracker_conf = iohub_config[tracker_class]
 
     controls = tracker_conf.get("controls", {})
-    move_setting = controls.get("move", [default])
-
-    if isinstance(move_setting, list):
-        move_button = move_setting[0] if move_setting else default
-    else:
-        move_button = move_setting
-
-    move_button = str(move_button).upper()
-
-    if move_button == "CONTINUOUS":
-        return -1
+    move_button = controls.get("move", default)
+    move_button = move_button.upper()
 
     return _BUTTON_MAP.get(move_button, _BUTTON_MAP[default])

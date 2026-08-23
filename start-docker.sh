@@ -1,0 +1,35 @@
+#!/bin/bash
+set -e
+
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_CMD="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_CMD="docker-compose"
+else
+  echo "Docker Compose is not installed. Please install Docker Compose first."
+  exit 1
+fi
+
+echo "Tobii PyTracker Docker Setup"
+echo "================================"
+
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed. Please install Docker first."
+    exit 1
+fi
+
+echo "Docker and Docker Compose are installed"
+echo ""
+
+echo "Building Docker image..."
+$COMPOSE_CMD build
+
+echo ""
+echo "Build complete!"
+echo ""
+echo "Starting Tobii PyTracker..."
+$COMPOSE_CMD up
+
+echo ""
+echo "Application stopped."
+echo "Connect to VNC server at: localhost:5900"

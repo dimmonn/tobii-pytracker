@@ -2,7 +2,7 @@ import yaml
 from psychopy import core, monitors, visual
 from psychopy.iohub import launchHubServer
 
-with open("/Users/dima/tobii/tobii-pytracker/configs/mouse_eyetracker_config.yaml", "r") as file:
+with open("./configs/mouse_eyetracker_config.yaml", "r") as file:
     config = yaml.safe_load(file)
 
 monitor = monitors.Monitor("spectrum_monitor")
