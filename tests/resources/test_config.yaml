@@ -1,7 +1,7 @@
 dataset:
   image:
     bbox_model: superpixel
-    path: datasets
+    path: ../datasets
 
 display:
   monitor:
