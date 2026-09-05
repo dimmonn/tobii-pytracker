@@ -21,10 +21,11 @@ fi
 echo "Docker and Docker Compose are installed"
 echo ""
 
-export UID=$(id -u)
-export GID=$(id -g)
-echo "Using UID=$UID, GID=$GID for file permissions"
+HOST_UID=$(id -u)
+HOST_GID=$(id -g)
+echo "Using UID=$HOST_UID, GID=$HOST_GID for file permissions"
 echo ""
+export HOST_UID HOST_GID
 
 echo "Building Docker image..."
 $COMPOSE_CMD build
