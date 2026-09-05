@@ -222,56 +222,29 @@ class TestBBoxGeneration(unittest.TestCase):
 
             bbox = record["bbox"]
 
-            self.assertIn(
-                "cx",
+            self.assertIsInstance(
                 bbox,
+                list,
             )
 
-            self.assertIn(
-                "cy",
-                bbox,
+            self.assertGreaterEqual(
+                len(bbox),
+                3,
             )
 
-            self.assertIn(
-                "w",
-                bbox,
-            )
+            for point in bbox:
+                self.assertEqual(
+                    len(point),
+                    2,
+                )
 
-            self.assertIn(
-                "h",
-                bbox,
-            )
+            x_coords = [point[0] for point in bbox]
+            y_coords = [point[1] for point in bbox]
 
-            self.assertGreater(
-                bbox["w"],
-                0,
-            )
-
-            self.assertGreater(
-                bbox["h"],
-                0,
-            )
-
-            # Bboxes use AOI-centered coordinates.
-            x_min = (
-                bbox["cx"]
-                - bbox["w"] / 2
-            )
-
-            x_max = (
-                bbox["cx"]
-                + bbox["w"] / 2
-            )
-
-            y_min = (
-                bbox["cy"]
-                - bbox["h"] / 2
-            )
-
-            y_max = (
-                bbox["cy"]
-                + bbox["h"] / 2
-            )
+            x_min = min(x_coords)
+            x_max = max(x_coords)
+            y_min = min(y_coords)
+            y_max = max(y_coords)
 
             self.assertGreaterEqual(
                 x_min,
@@ -291,6 +264,23 @@ class TestBBoxGeneration(unittest.TestCase):
             self.assertLessEqual(
                 y_max,
                 375,
+            )
+
+            self.assertIn(
+                "rect_bbox",
+                record,
+            )
+
+            rect_bbox = record["rect_bbox"]
+
+            self.assertIn(
+                "cx",
+                rect_bbox,
+            )
+
+            self.assertIn(
+                "cy",
+                rect_bbox,
             )
     # TODO not working yet
     def test_saliency_bbox_generation(self):

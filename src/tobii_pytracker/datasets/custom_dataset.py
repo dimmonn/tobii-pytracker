@@ -43,6 +43,25 @@ def _image_load_size(path: str) -> Tuple[int, int]:
         return im.size  # width, height
 
 
+def _contour_to_centered_polygon(
+    contour: np.ndarray,
+    img_w: int,
+    img_h: int,
+    area_x: int,
+    area_y: int,
+) -> List[Tuple[float, float]]:
+    scale_x = area_x / img_w
+    scale_y = area_y / img_h
+
+    return [
+        (
+            float(col * scale_x - (area_x / 2.0)),
+            float((area_y / 2.0) - (row * scale_y)),
+        )
+        for row, col in contour
+    ]
+
+
 # -------------------------
 # Base dataset
 # -------------------------
@@ -367,10 +386,8 @@ class ImageDataset(CustomDataset):
     # ------------------------------------------------------------------
     def _detect_superpixels(self, image_path: str, n_segments: int = 50):
         from skimage.segmentation import slic
-        from skimage.io import imread
-        import numpy as np
+        from skimage.measure import find_contours
         from PIL import Image
-        from skimage.segmentation import slic
 
         area_x, area_y = self.config.get_area_of_interest_size()
 
@@ -391,18 +408,35 @@ class ImageDataset(CustomDataset):
         detections = []
 
         for seg_id in np.unique(segments):
-            ys, xs = np.where(segments == seg_id)
-            x_min, x_max = xs.min(), xs.max()
-            y_min, y_max = ys.min(), ys.max()
+            segment_mask = segments == seg_id
+            contours = find_contours(segment_mask.astype(float), 0.5)
+            if not contours:
+                continue
+
+            contour = max(contours, key=len)
+            polygon = _contour_to_centered_polygon(
+                contour=contour,
+                img_w=w,
+                img_h=h,
+                area_x=area_x,
+                area_y=area_y,
+            )
+
+            polygon_array = np.asarray(polygon, dtype=float)
+            x_min = float(polygon_array[:, 0].min())
+            x_max = float(polygon_array[:, 0].max())
+            y_min = float(polygon_array[:, 1].min())
+            y_max = float(polygon_array[:, 1].max())
 
             detections.append({
                 "class": "superpixel",
                 "conf": 1.0,
-                "bbox": _to_centered_bbox_from_tl(
-                    x_min * (area_x / w),
-                    y_min * (area_y / h),
-                    x_max * (area_x / w),
-                    y_max * (area_y / h),
+                "bbox": polygon,
+                "rect_bbox": _to_centered_bbox_from_tl(
+                    x_min + (area_x / 2.0),
+                    (area_y / 2.0) - y_max,
+                    x_max + (area_x / 2.0),
+                    (area_y / 2.0) - y_min,
                     area_x, area_y
                 )
             })

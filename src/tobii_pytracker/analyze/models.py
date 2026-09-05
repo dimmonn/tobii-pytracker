@@ -1338,6 +1338,7 @@ from typing import Optional, Any, Dict, List
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.patches as patches
+from matplotlib.path import Path as MplPath
 import numpy as np
 import pandas as pd
 
@@ -1378,6 +1379,43 @@ class BBoxAttentionAnalyzer:
             "y_min": cy - h / 2.0,
             "y_max": cy + h / 2.0,
         }
+
+    @staticmethod
+    def _polygon_vertices(value: Any) -> Optional[np.ndarray]:
+        if value is None:
+            return None
+
+        vertices: List[List[float]] = []
+
+        try:
+            for point in value:
+                if isinstance(point, dict):
+                    vertices.append([float(point["x"]), float(point["y"])])
+                else:
+                    x, y = point
+                    vertices.append([float(x), float(y)])
+        except (TypeError, ValueError, KeyError, IndexError):
+            return None
+
+        if len(vertices) < 3:
+            return None
+
+        return np.asarray(vertices, dtype=float)
+
+    @staticmethod
+    def _point_inside_polygon(x: float, y: float, polygon: np.ndarray) -> bool:
+        return bool(MplPath(polygon, closed=True).contains_point((x, y)))
+
+    @staticmethod
+    def _polygon_to_plot_coords(
+        polygon: np.ndarray,
+        width: float,
+        height: float,
+    ) -> np.ndarray:
+        return np.column_stack([
+            width / 2.0 + polygon[:, 0],
+            height / 2.0 - polygon[:, 1],
+        ])
 
     @staticmethod
     def _point_inside_bbox(x: float, y: float, bbox: Dict[str, float]) -> bool:
@@ -1443,9 +1481,44 @@ class BBoxAttentionAnalyzer:
             total_points = len(slide_gaze)
 
             for bbox_index, bbox_record in enumerate(image_bboxes):
-                bbox = bbox_record.get("bbox", {})
+                bbox_payload = bbox_record.get("bbox", {})
+                polygon = self._polygon_vertices(bbox_payload)
 
-                if not {"cx", "cy", "w", "h"}.issubset(bbox.keys()):
+                if polygon is None:
+                    polygon = self._polygon_vertices(
+                        bbox_record.get("polygon")
+                    )
+
+                rect_bbox = bbox_record.get("rect_bbox", {})
+                if not isinstance(rect_bbox, dict):
+                    rect_bbox = {}
+
+                if polygon is not None:
+                    x_min = float(polygon[:, 0].min())
+                    x_max = float(polygon[:, 0].max())
+                    y_min = float(polygon[:, 1].min())
+                    y_max = float(polygon[:, 1].max())
+
+                    cx = (x_min + x_max) / 2.0
+                    cy = (y_min + y_max) / 2.0
+                    bbox_width = x_max - x_min
+                    bbox_height = y_max - y_min
+                elif isinstance(bbox_payload, dict) and {
+                    "cx",
+                    "cy",
+                    "w",
+                    "h",
+                }.issubset(bbox_payload.keys()):
+                    cx = float(bbox_payload["cx"])
+                    cy = float(bbox_payload["cy"])
+                    bbox_width = float(bbox_payload["w"])
+                    bbox_height = float(bbox_payload["h"])
+                elif {"cx", "cy", "w", "h"}.issubset(rect_bbox.keys()):
+                    cx = float(rect_bbox["cx"])
+                    cy = float(rect_bbox["cy"])
+                    bbox_width = float(rect_bbox["w"])
+                    bbox_height = float(rect_bbox["h"])
+                else:
                     continue
 
                 hits = []
@@ -1455,7 +1528,22 @@ class BBoxAttentionAnalyzer:
                     x = float(gaze_row[x_col])
                     y = float(gaze_row[y_col])
 
-                    if self._point_inside_bbox(x, y, bbox):
+                    inside = (
+                        self._point_inside_polygon(x, y, polygon)
+                        if polygon is not None
+                        else self._point_inside_bbox(
+                            x,
+                            y,
+                            {
+                                "cx": cx,
+                                "cy": cy,
+                                "w": bbox_width,
+                                "h": bbox_height,
+                            },
+                        )
+                    )
+
+                    if inside:
                         hits.append(gaze_row)
                         hit_gaze_indices.append(int(gaze_idx))
 
@@ -1477,10 +1565,11 @@ class BBoxAttentionAnalyzer:
                     "bbox_index": bbox_index,
                     "bbox_class": bbox_record.get("class"),
                     "bbox_conf": bbox_record.get("conf"),
-                    "cx": float(bbox["cx"]),
-                    "cy": float(bbox["cy"]),
-                    "w": float(bbox["w"]),
-                    "h": float(bbox["h"]),
+                    "cx": float(cx),
+                    "cy": float(cy),
+                    "w": float(bbox_width),
+                    "h": float(bbox_height),
+                    "polygon": polygon.tolist() if polygon is not None else None,
                     "total_gaze_points": total_points,
                     "hit_count": hit_count,
                     "hit_gaze_indices": hit_gaze_indices,
@@ -1664,36 +1753,56 @@ class BBoxAttentionAnalyzer:
         max_score = float(boxes["attention_score"].max())
 
         for _, row in boxes.iterrows():
-            cx = float(row["cx"])
-            cy = float(row["cy"])
-            bbox_width = float(row["w"])
-            bbox_height = float(row["h"])
-
-            x_min = width / 2.0 + (cx - bbox_width / 2.0)
-            y_min = height / 2.0 - (cy + bbox_height / 2.0)
-
             score = float(row["attention_score"])
             intensity = (
                 score / max_score
                 if max_score > 0
                 else 0.0
             )
+            polygon = self._polygon_vertices(row.get("polygon"))
+            if polygon is None:
+                polygon = self._polygon_vertices(row.get("bbox"))
 
-            rectangle = patches.Rectangle(
-                (x_min, y_min),
-                bbox_width,
-                bbox_height,
-                linewidth=4.0,
-                edgecolor="black",
-                facecolor="none",
-                alpha=0.25 + 0.75 * intensity,
-            )
+            if polygon is not None:
+                polygon_xy = self._polygon_to_plot_coords(
+                    polygon,
+                    width,
+                    height,
+                )
+                patch = patches.Polygon(
+                    polygon_xy,
+                    closed=True,
+                    linewidth=4.0,
+                    edgecolor="black",
+                    facecolor="none",
+                    alpha=0.25 + 0.75 * intensity,
+                )
+                ax.add_patch(patch)
+                label_x, label_y = polygon_xy.mean(axis=0)
+            else:
+                cx = float(row["cx"])
+                cy = float(row["cy"])
+                bbox_width = float(row["w"])
+                bbox_height = float(row["h"])
+                x_min = width / 2.0 + (cx - bbox_width / 2.0)
+                y_min = height / 2.0 - (cy + bbox_height / 2.0)
 
-            ax.add_patch(rectangle)
+                rectangle = patches.Rectangle(
+                    (x_min, y_min),
+                    bbox_width,
+                    bbox_height,
+                    linewidth=4.0,
+                    edgecolor="black",
+                    facecolor="none",
+                    alpha=0.25 + 0.75 * intensity,
+                )
+
+                ax.add_patch(rectangle)
+                label_x, label_y = x_min, y_min
 
             ax.text(
-                x_min + 3,
-                y_min + 14,
+                label_x + 3,
+                label_y + 14,
                 f"{int(row['hit_count'])}",
                 color="white",
                 fontsize=10,
