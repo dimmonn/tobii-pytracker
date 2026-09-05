@@ -70,7 +70,8 @@ jobs:
             pytest tests -v \
               --cov=src/tobii_pytracker \
               --cov-report=term \
-              --cov-report=xml:coverage.xml
+              --cov-report=xml:coverage.xml \
+              --cov-report=html:htmlcov
 
       - name: Calculate coverage label
         id: coverage
@@ -83,30 +84,51 @@ jobs:
           pct = float(root.attrib["line-rate"]) * 100
           if pct >= 90:
               label = "coverage: excellent (>=90%)"
+              color = "brightgreen"
           elif pct >= 80:
               label = "coverage: good (80-89%)"
+              color = "green"
           elif pct >= 70:
               label = "coverage: fair (70-79%)"
+              color = "yellow"
+          elif pct >= 60:
+              label = "coverage: low (<70%)"
+              color = "orange"
           else:
               label = "coverage: low (<70%)"
+              color = "red"
 
           print(f"Coverage: {pct:.2f}%")
+          badge_url = f"https://img.shields.io/badge/coverage-{pct:.2f}%25-{color}"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"coverage_pct={pct:.2f}\n")
               f.write(f"coverage_label={label}\n")
+              f.write(f"coverage_badge_url={badge_url}\n")
           PY
 
-      - name: Publish coverage summary
-        run: |
-          echo "### Test coverage: ${{ steps.coverage.outputs.coverage_pct }}%" >> "$GITHUB_STEP_SUMMARY"
-          echo "Coverage label: \`${{ steps.coverage.outputs.coverage_label }}\`" >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload coverage report
+      - name: Upload coverage XML report
+        id: coverage_xml_artifact
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
           if-no-files-found: error
+
+      - name: Upload HTML line coverage report
+        id: coverage_html_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: error
+
+      - name: Publish coverage summary
+        run: |
+          COVERAGE_ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.coverage_html_artifact.outputs.artifact-id }}"
+          echo "### Test coverage: ${{ steps.coverage.outputs.coverage_pct }}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "[![Coverage Badge](${{ steps.coverage.outputs.coverage_badge_url }})](${COVERAGE_ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
+          echo "Coverage label: \`${{ steps.coverage.outputs.coverage_label }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Open line-level coverage report (HTML)](${COVERAGE_ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Label PR with coverage
         if: ${{ github.event_name == 'pull_request' }}
