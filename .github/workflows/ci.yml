@@ -57,6 +57,9 @@ jobs:
       - name: Install PsychoPy runtime dependency
         run: python -m pip install "psychopy>=2024.1.4,<2025.1.0" --no-deps
 
+      - name: Ensure test dataset directory exists
+        run: mkdir -p datasets
+
       - name: Run tests with coverage in virtual X display
         env:
           PYTHONUNBUFFERED: "1"
