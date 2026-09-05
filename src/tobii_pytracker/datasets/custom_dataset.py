@@ -29,9 +29,7 @@ def _to_centered_bbox_from_tl(x_min_px: float, y_min_px: float, x_max_px: float,
     x_center_px = x_min_px + w_px / 2.0
     y_center_px = y_min_px + h_px / 2.0
 
-    # center-origin
     cx = x_center_px - (area_x / 2.0)
-    # convert y: top-left -> center-origin with positive-up
     cy = (area_y / 2.0) - y_center_px
 
     return {"cx": float(cx), "cy": float(cy), "w": float(w_px), "h": float(h_px)}
@@ -255,7 +253,11 @@ class ImageDataset(CustomDataset):
         self.model = None
         self.default_detector = None
         if calculate_bboxes:
-            self.default_detector = config.get("default_detector", "grid")  # grid | superpixel | saliency
+            cfg_dict = getattr(config, "config", {})
+            if isinstance(cfg_dict, dict):
+                self.default_detector = cfg_dict.get("default_detector", "grid")
+            else:
+                self.default_detector = "grid"
 
         # Attempt to load a custom model from config
         if self.calculate_bboxes:
@@ -385,9 +387,10 @@ class ImageDataset(CustomDataset):
     # SUPERPIXEL fallback
     # ------------------------------------------------------------------
     def _detect_superpixels(self, image_path: str, n_segments: int = 50):
-        from skimage.segmentation import slic
-        from skimage.measure import find_contours
+        import cv2
+        import numpy as np
         from PIL import Image
+        from skimage.segmentation import slic
 
         area_x, area_y = self.config.get_area_of_interest_size()
 
@@ -406,39 +409,56 @@ class ImageDataset(CustomDataset):
         )
 
         detections = []
-
         for seg_id in np.unique(segments):
-            segment_mask = segments == seg_id
-            contours = find_contours(segment_mask.astype(float), 0.5)
+
+            segment_mask = (segments == seg_id).astype(np.uint8)
+
+            contours, _ = cv2.findContours(
+                segment_mask,
+                mode=cv2.RETR_EXTERNAL,
+                method=cv2.CHAIN_APPROX_NONE,
+            )
+
             if not contours:
                 continue
+            contour = max(contours, key=cv2.contourArea)
+            contour_xy = contour.reshape(-1, 2)
 
-            contour = max(contours, key=len)
+            if contour_xy.shape[0] < 3:
+                continue
+
+            contour_for_arc = contour_xy.astype(np.float32).reshape(-1, 1, 2)
+
+            perimeter = cv2.arcLength(
+                contour_for_arc,
+                closed=True,
+            )
+
+            epsilon = 0.002 * perimeter
+
+            approx = cv2.approxPolyDP(
+                contour_for_arc,
+                epsilon,
+                closed=True,
+            ).reshape(-1, 2)
+
+            if approx.shape[0] < 3:
+                approx = contour_xy
+            contour_row_col = np.column_stack(
+                (approx[:, 1], approx[:, 0])
+            )
+
             polygon = _contour_to_centered_polygon(
-                contour=contour,
+                contour=contour_row_col,
                 img_w=w,
                 img_h=h,
                 area_x=area_x,
                 area_y=area_y,
             )
-
-            polygon_array = np.asarray(polygon, dtype=float)
-            x_min = float(polygon_array[:, 0].min())
-            x_max = float(polygon_array[:, 0].max())
-            y_min = float(polygon_array[:, 1].min())
-            y_max = float(polygon_array[:, 1].max())
-
             detections.append({
                 "class": "superpixel",
                 "conf": 1.0,
-                "bbox": polygon,
-                "rect_bbox": _to_centered_bbox_from_tl(
-                    x_min + (area_x / 2.0),
-                    (area_y / 2.0) - y_max,
-                    x_max + (area_x / 2.0),
-                    (area_y / 2.0) - y_min,
-                    area_x, area_y
-                )
+                "polygon": polygon
             })
 
         return detections

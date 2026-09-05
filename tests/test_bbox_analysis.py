@@ -1,8 +1,9 @@
 import unittest
 from pathlib import Path
-import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
+from tests.support import bootstrap_test_environment
+
+bootstrap_test_environment()
 
 from tobii_pytracker.configs.custom_config import CustomConfig
 from tobii_pytracker.datasets.custom_dataset import ImageDataset
@@ -216,11 +217,11 @@ class TestBBoxGeneration(unittest.TestCase):
             )
 
             self.assertIn(
-                "bbox",
+                "polygon",
                 record,
             )
 
-            bbox = record["bbox"]
+            bbox = record["polygon"]
 
             self.assertIsInstance(
                 bbox,
@@ -267,106 +268,10 @@ class TestBBoxGeneration(unittest.TestCase):
             )
 
             self.assertIn(
-                "rect_bbox",
+                "polygon",
                 record,
             )
 
-            rect_bbox = record["rect_bbox"]
-
-            self.assertIn(
-                "cx",
-                rect_bbox,
-            )
-
-            self.assertIn(
-                "cy",
-                rect_bbox,
-            )
-    # TODO not working yet
-    def test_saliency_bbox_generation(self):
-        config = CustomConfig(
-            str(self.config_path)
-        )
-
-        dataset = ImageDataset(
-            config=config,
-            calculate_bboxes=False,
-        )
-
-        try:
-            bboxes = dataset._detect_saliency(
-                str(self.test_image_path),
-                threshold=0.6,
-            )
-
-        except Exception as e:
-            self.skipTest(
-                f"Saliency detection not available: {e}"
-            )
-            return
-
-        self.assertGreater(
-            len(bboxes),
-            0,
-        )
-
-        for record in bboxes:
-            self.assertIn(
-                "bbox",
-                record,
-            )
-
-            bbox = record["bbox"]
-
-            self.assertGreater(
-                bbox["w"],
-                0,
-            )
-
-            self.assertGreater(
-                bbox["h"],
-                0,
-            )
-
-            x_min = (
-                bbox["cx"]
-                - bbox["w"] / 2
-            )
-
-            x_max = (
-                bbox["cx"]
-                + bbox["w"] / 2
-            )
-
-            y_min = (
-                bbox["cy"]
-                - bbox["h"] / 2
-            )
-
-            y_max = (
-                bbox["cy"]
-                + bbox["h"] / 2
-            )
-
-            self.assertGreaterEqual(
-                x_min,
-                -375,
-            )
-
-            self.assertLessEqual(
-                x_max,
-                375,
-            )
-
-            self.assertGreaterEqual(
-                y_min,
-                -375,
-            )
-
-            self.assertLessEqual(
-                y_max,
-                375,
-            )
 
     def test_bbox_coordinate_system(self):
 

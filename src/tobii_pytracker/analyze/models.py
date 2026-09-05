@@ -1338,17 +1338,70 @@ from typing import Optional, Any, Dict, List
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.patches as patches
+import matplotlib.colors as mcolors
+import matplotlib.patheffects as pe
 from matplotlib.path import Path as MplPath
 import numpy as np
 import pandas as pd
 
 
-class BBoxAttentionAnalyzer:
+class SlideScopedAnalyzer(BaseAnalyzer):
+    """
+    Shared helpers for analyzers that work on set/slide scoped data.
+    """
 
     def __init__(self, output_folder: Path):
-        self.output_folder = Path(output_folder)
+        super().__init__(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
-        self.results: Optional[pd.DataFrame] = None
+
+    @staticmethod
+    def _normalize_slide_index_column(
+        data: pd.DataFrame,
+        column: str = "slide_index",
+    ) -> pd.DataFrame:
+        normalized = data.copy()
+        normalized[column] = pd.to_numeric(
+            normalized[column],
+            errors="coerce",
+        ).astype("Int64")
+        return normalized
+
+    @staticmethod
+    def _filter_set_and_slide(
+        data: pd.DataFrame,
+        set_name: Optional[Any] = None,
+        slide_index: Optional[Any] = None,
+    ) -> pd.DataFrame:
+        filtered = data
+
+        if set_name is not None and "set_name" in filtered.columns:
+            filtered = filtered[
+                filtered["set_name"].astype(str) == str(set_name)
+            ]
+
+        if slide_index is not None and "slide_index" in filtered.columns:
+            filtered = filtered[
+                pd.to_numeric(
+                    filtered["slide_index"],
+                    errors="coerce",
+                ) == int(slide_index)
+            ]
+
+        return filtered
+
+    @staticmethod
+    def _resolve_gaze_columns(
+        use_fixations: bool,
+    ) -> tuple[str, str, Optional[str]]:
+        if use_fixations:
+            return "x_mean", "y_mean", "duration"
+        return "avg_gaze_x", "avg_gaze_y", None
+
+
+class BBoxAttentionAnalyzer(SlideScopedAnalyzer):
+
+    def __init__(self, output_folder: Path):
+        super().__init__(output_folder)
 
     @staticmethod
     def _parse_objects_bboxes(value: Any) -> Dict[str, Any]:
@@ -1418,12 +1471,12 @@ class BBoxAttentionAnalyzer:
         ])
 
     @staticmethod
-    def _point_inside_bbox(x: float, y: float, bbox: Dict[str, float]) -> bool:
+    def _point_inside_bbox(x: float, y: float, bbox: Dict[str, float], margin: float = 2.0) -> bool:
         edges = BBoxAttentionAnalyzer._bbox_edges_centered(bbox)
 
         return (
-            edges["x_min"] <= x <= edges["x_max"]
-            and edges["y_min"] <= y <= edges["y_max"]
+            edges["x_min"] - margin <= x <= edges["x_max"] + margin
+            and edges["y_min"] - margin <= y <= edges["y_max"] + margin
         )
 
     def analyze(
@@ -1443,33 +1496,21 @@ class BBoxAttentionAnalyzer:
         if "slide_index" not in raw_data.columns:
             raw_data["slide_index"] = raw_data.groupby("set_name").cumcount()
 
-        raw_data["slide_index"] = pd.to_numeric(
-            raw_data["slide_index"],
-            errors="coerce",
-        ).astype("Int64")
-
-        gaze_data["slide_index"] = pd.to_numeric(
-            gaze_data["slide_index"],
-            errors="coerce",
-        ).astype("Int64")
-
-        if use_fixations:
-            x_col = "x_mean"
-            y_col = "y_mean"
-            duration_col = "duration"
-        else:
-            x_col = "avg_gaze_x"
-            y_col = "avg_gaze_y"
-            duration_col = None
+        raw_data = self._normalize_slide_index_column(raw_data)
+        gaze_data = self._normalize_slide_index_column(gaze_data)
+        x_col, y_col, duration_col = self._resolve_gaze_columns(
+            use_fixations=use_fixations
+        )
 
         for _, row in raw_data.iterrows():
             set_name = str(row["set_name"])
             slide_index = int(row["slide_index"])
 
-            slide_gaze = gaze_data[
-                (gaze_data["set_name"].astype(str) == set_name)
-                & (gaze_data["slide_index"].astype("Int64") == slide_index)
-            ].copy()
+            slide_gaze = self._filter_set_and_slide(
+                gaze_data,
+                set_name=set_name,
+                slide_index=slide_index,
+            ).copy()
 
             slide_gaze = slide_gaze.dropna(subset=[x_col, y_col])
 
@@ -1685,28 +1726,16 @@ class BBoxAttentionAnalyzer:
         boxes = scored_bboxes.copy()
         slide_gaze = gaze_data.copy()
 
-        if set_name is not None:
-            boxes = boxes[
-                boxes["set_name"].astype(str) == str(set_name)
-                ]
-            slide_gaze = slide_gaze[
-                slide_gaze["set_name"].astype(str) == str(set_name)
-                ]
-
-        if slide_index is not None:
-            boxes = boxes[
-                pd.to_numeric(
-                    boxes["slide_index"],
-                    errors="coerce",
-                ) == int(slide_index)
-                ]
-
-            slide_gaze = slide_gaze[
-                pd.to_numeric(
-                    slide_gaze["slide_index"],
-                    errors="coerce",
-                ) == int(slide_index)
-                ]
+        boxes = self._filter_set_and_slide(
+            boxes,
+            set_name=set_name,
+            slide_index=slide_index,
+        )
+        slide_gaze = self._filter_set_and_slide(
+            slide_gaze,
+            set_name=set_name,
+            slide_index=slide_index,
+        )
 
         if min_hits is not None:
             boxes = boxes[boxes["hit_count"] >= min_hits]
@@ -1745,12 +1774,20 @@ class BBoxAttentionAnalyzer:
             ax.scatter(
                 gaze_x,
                 gaze_y,
-                s=12,
-                alpha=0.45,
+                s=40,
+                alpha=0.8,
+                c="#FF1493",
+                edgecolors="white",
+                linewidths=1.5,
                 label="gaze samples",
+                zorder=10,
             )
 
         max_score = float(boxes["attention_score"].max())
+        border_color = "white"
+        border_linewidth = 2.5
+        border_halo_linewidth = 5.5
+        fill_color = "#00E5FF"
 
         for _, row in boxes.iterrows():
             score = float(row["attention_score"])
@@ -1764,6 +1801,10 @@ class BBoxAttentionAnalyzer:
                 polygon = self._polygon_vertices(row.get("bbox"))
 
             if polygon is not None:
+                fill_rgba = mcolors.to_rgba(
+                    fill_color,
+                    alpha=0.08 + 0.22 * intensity,
+                )
                 polygon_xy = self._polygon_to_plot_coords(
                     polygon,
                     width,
@@ -1772,14 +1813,25 @@ class BBoxAttentionAnalyzer:
                 patch = patches.Polygon(
                     polygon_xy,
                     closed=True,
-                    linewidth=4.0,
-                    edgecolor="black",
-                    facecolor="none",
-                    alpha=0.25 + 0.75 * intensity,
+                    linewidth=border_linewidth,
+                    edgecolor=border_color,
+                    facecolor=fill_rgba,
+                    zorder=8,
                 )
+                patch.set_path_effects([
+                    pe.Stroke(
+                        linewidth=border_halo_linewidth,
+                        foreground="black",
+                    ),
+                    pe.Normal(),
+                ])
                 ax.add_patch(patch)
                 label_x, label_y = polygon_xy.mean(axis=0)
             else:
+                fill_rgba = mcolors.to_rgba(
+                    fill_color,
+                    alpha=0.08 + 0.22 * intensity,
+                )
                 cx = float(row["cx"])
                 cy = float(row["cy"])
                 bbox_width = float(row["w"])
@@ -1791,11 +1843,18 @@ class BBoxAttentionAnalyzer:
                     (x_min, y_min),
                     bbox_width,
                     bbox_height,
-                    linewidth=4.0,
-                    edgecolor="black",
-                    facecolor="none",
-                    alpha=0.25 + 0.75 * intensity,
+                    linewidth=border_linewidth,
+                    edgecolor=border_color,
+                    facecolor=fill_rgba,
+                    zorder=8,
                 )
+                rectangle.set_path_effects([
+                    pe.Stroke(
+                        linewidth=border_halo_linewidth,
+                        foreground="black",
+                    ),
+                    pe.Normal(),
+                ])
 
                 ax.add_patch(rectangle)
                 label_x, label_y = x_min, y_min

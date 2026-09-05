@@ -4,6 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: tobii-pytracker
+    user: "${UID}:${GID}"
     environment:
       - DISPLAY=:99
       - PYTHONUNBUFFERED=1
