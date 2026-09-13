@@ -23,7 +23,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install headless PsychoPy system dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -49,7 +49,8 @@ jobs:
             wheel
 
       - name: Install project
-        run: python -m pip install -e .
+        run: |
+          python -m pip install -e .
 
       - name: Install test dependencies
         run: |
@@ -59,24 +60,37 @@ jobs:
             pyyaml \
             "scikit-image>=0.24,<0.26"
 
-      - name: Install PsychoPy
+      - name: Install PsychoPy without dependencies
         run: |
-          python -m pip install "psychopy>=2024.1.4,<2025.1.0"
+          python -m pip install \
+            "psychopy>=2024.1.4,<2025.1.0" \
+            --no-deps
 
       - name: Verify PsychoPy installation
         run: |
           python - <<'PY'
           import psychopy
+
+          print("PsychoPy loaded from:")
+          print(psychopy.__file__)
+
+          if not hasattr(psychopy, "__path__"):
+              raise RuntimeError(
+                  "The imported 'psychopy' is not a package. "
+                  "A local psychopy.py/module may be shadowing PsychoPy."
+              )
+
           from psychopy.iohub import launchHubServer
 
-          print("PsychoPy:", psychopy.__file__)
-          print("ioHub:", launchHubServer)
+          print("PsychoPy ioHub import: OK")
+          print("launchHubServer:", launchHubServer)
           PY
 
       - name: Ensure test dataset directory exists
-        run: mkdir -p datasets
+        run: |
+          mkdir -p datasets
 
-      - name: Run tests with coverage in virtual X display
+      - name: Run tests with coverage
         env:
           PYTHONUNBUFFERED: "1"
           DISPLAY: ":99"
@@ -113,6 +127,7 @@ jobs:
               color = "red"
 
           print(f"Coverage: {pct:.2f}%")
+          print(f"Label: {label}")
 
           badge_url = (
               f"https://img.shields.io/badge/"
@@ -133,7 +148,7 @@ jobs:
           path: coverage.xml
           if-no-files-found: error
 
-      - name: Upload HTML line coverage report
+      - name: Upload HTML coverage report
         id: coverage_html_artifact
         uses: actions/upload-artifact@v4
         with:
@@ -145,10 +160,15 @@ jobs:
         run: |
           COVERAGE_ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.coverage_html_artifact.outputs.artifact-id }}"
 
-          echo "### Test coverage: ${{ steps.coverage.outputs.coverage_pct }}%" >> "$GITHUB_STEP_SUMMARY"
-          echo "[![Coverage Badge](${{ steps.coverage.outputs.coverage_badge_url }})](${COVERAGE_ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
-          echo "Coverage label: \`${{ steps.coverage.outputs.coverage_label }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo "[Open line-level coverage report (HTML)](${COVERAGE_ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Test coverage: ${{ steps.coverage.outputs.coverage_pct }}%"
+            echo
+            echo "[![Coverage Badge](${{ steps.coverage.outputs.coverage_badge_url }})](${COVERAGE_ARTIFACT_URL})"
+            echo
+            echo "Coverage label: \`${{ steps.coverage.outputs.coverage_label }}\`"
+            echo
+            echo "[Open line-level coverage report (HTML)](${COVERAGE_ARTIFACT_URL})"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Label PR with coverage
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
@@ -196,7 +216,7 @@ jobs:
               labels: newLabels
             });
 
-            core.info(`Set coverage label to: ${keepLabel}`);
+            core.info(`Coverage label set to: ${keepLabel}`);
 
   package:
     name: Build package
@@ -223,10 +243,12 @@ jobs:
             twine
 
       - name: Build distribution
-        run: python -m build
+        run: |
+          python -m build
 
       - name: Check distribution
-        run: python -m twine check dist/*
+        run: |
+          python -m twine check dist/*
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
