@@ -6,3 +6,4 @@ Pillow>=9.0.0
 opencv-python>=4.6.0
 scikit-image>=0.19.0
 matplotlib>=3.5.0
+psychopy-eyetracker-tobii==0.0.3
