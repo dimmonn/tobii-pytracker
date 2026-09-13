@@ -1,6 +1,18 @@
-import pytest
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
+
+import pytest
+
+psychopy = ModuleType("psychopy")
+iohub = ModuleType("psychopy.iohub")
+iohub.launchHubServer = MagicMock()
+
+psychopy.iohub = iohub
+
+sys.modules["psychopy"] = psychopy
+sys.modules["psychopy.iohub"] = iohub
+
 
 import tobii_pytracker.utils.eyetracker as eyetracker
 
