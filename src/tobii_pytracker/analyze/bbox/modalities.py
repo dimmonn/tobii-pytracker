@@ -10,8 +10,6 @@ import numpy as np
 import pandas as pd
 
 from .parsing import parse_objects_bboxes
-from .plotting import plot_bbox_attention
-from .scoring import analyze_bbox_attention
 
 
 def parse_input_data(raw_input_data: Any) -> np.ndarray:
@@ -416,74 +414,3 @@ def plot_bbox_text(
         plt.close(fig)
     return fig, ax
 
-
-def analyze_bbox_image(
-    slide_data: pd.DataFrame,
-    set_name: Optional[Any],
-    slide_index: Optional[Any],
-    normalize_slide_index_column: Callable[[pd.DataFrame], pd.DataFrame],
-    filter_set_and_slide: Callable[..., pd.DataFrame],
-) -> pd.DataFrame:
-    if slide_data is None or slide_data.empty:
-        return pd.DataFrame()
-    data = slide_data.copy()
-    if "slide_index" in data.columns:
-        data = normalize_slide_index_column(data)
-    data = filter_set_and_slide(data, set_name=set_name, slide_index=slide_index)
-    if data.empty:
-        return pd.DataFrame()
-    if "objects_bboxes" not in data.columns:
-        raise ValueError("slide_data must contain 'objects_bboxes'.")
-    if "avg_gaze_x" not in data.columns or "avg_gaze_y" not in data.columns:
-        raise ValueError("slide_data must contain 'avg_gaze_x' and 'avg_gaze_y'.")
-
-    if "set_name" in data.columns and "slide_index" in data.columns:
-        raw_data = (
-            data[["set_name", "slide_index", "objects_bboxes"]]
-            .groupby(["set_name", "slide_index"], as_index=False)
-            .agg({"objects_bboxes": "first"})
-        )
-    else:
-        raw_data = data[["objects_bboxes"]].head(1).copy()
-        raw_data["set_name"] = None
-        raw_data["slide_index"] = None
-        raw_data = raw_data[["set_name", "slide_index", "objects_bboxes"]]
-    gaze_data = data
-    return analyze_bbox_attention(
-        raw_data=raw_data,
-        gaze_data=gaze_data,
-        use_fixations=False,
-        normalize_slide_index_column=normalize_slide_index_column,
-        filter_set_and_slide=filter_set_and_slide,
-        resolve_gaze_columns=lambda use_fixations: ("avg_gaze_x", "avg_gaze_y", None),
-    )
-
-
-def plot_bbox_image(
-    scored_bboxes: pd.DataFrame,
-    gaze_data: pd.DataFrame,
-    screenshot_path: Path,
-    set_name: Optional[str],
-    slide_index: Optional[int],
-    title: Optional[str],
-    top_k: Optional[int],
-    min_hits: int,
-    show_gaze: bool,
-    show: bool,
-    save_path: Optional[Path],
-    filter_set_and_slide: Callable[..., pd.DataFrame],
-):
-    return plot_bbox_attention(
-        scored_bboxes=scored_bboxes,
-        gaze_data=gaze_data,
-        screenshot_path=screenshot_path,
-        set_name=set_name,
-        slide_index=slide_index,
-        title=title,
-        top_k=top_k,
-        min_hits=min_hits,
-        show_gaze=show_gaze,
-        show=show,
-        save_path=save_path,
-        filter_set_and_slide=filter_set_and_slide,
-    )

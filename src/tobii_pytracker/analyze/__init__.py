@@ -9,7 +9,6 @@ from .models import (
     ScanpathsAnalyzer,
     VoiceTranscription,
     BBoxAttentionAnalyzer,
-    BBoxImageAnalyzer,
     BBoxTextAnalyzer,
     BBoxTimeSeriesAnalyzer,
 )
@@ -26,7 +25,6 @@ __all__ = [
     "ScanpathsAnalyzer",
     "VoiceTranscription",
     "BBoxAttentionAnalyzer",
-    "BBoxImageAnalyzer",
     "BBoxTextAnalyzer",
     "BBoxTimeSeriesAnalyzer",
 ]

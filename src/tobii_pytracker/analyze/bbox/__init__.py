@@ -16,8 +16,6 @@ from .modalities import (
     plot_bbox_timeseries,
     analyze_bbox_text,
     plot_bbox_text,
-    analyze_bbox_image,
-    plot_bbox_image,
 )
 
 __all__ = [
@@ -37,6 +35,4 @@ __all__ = [
     "plot_bbox_timeseries",
     "analyze_bbox_text",
     "plot_bbox_text",
-    "analyze_bbox_image",
-    "plot_bbox_image",
 ]

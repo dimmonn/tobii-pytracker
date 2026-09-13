@@ -13,7 +13,6 @@ from tobii_pytracker.analyze.models import (
     SaccadeAnalyzer,
     EntropyAnalyzer,
     BBoxAttentionAnalyzer,
-    BBoxImageAnalyzer,
     BBoxTextAnalyzer,
     BBoxTimeSeriesAnalyzer,
     ClusterAnalyzer,
@@ -556,29 +555,11 @@ class TestBBoxTimeSeriesAnalyzerCoverage(unittest.TestCase):
         self.assertIsNotNone(ax)
 
 
-class TestBBoxImageAndTextAnalyzerCoverage(unittest.TestCase):
+class TestBBoxTextAnalyzerCoverage(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
         self.output_folder = Path(self.temp_dir)
-
-    def test_bbox_image_analyzer_analyze(self):
-        analyzer = BBoxImageAnalyzer(self.output_folder)
-        slide_data = pd.DataFrame({
-            "set_name": ["test_set", "test_set"],
-            "slide_index": [0, 0],
-            "objects_bboxes": [{
-                "image_bboxes": [
-                    {"bbox": {"cx": 0.0, "cy": 0.0, "w": 20.0, "h": 20.0}},
-                ]
-            }] * 2,
-            "avg_gaze_x": [0.0, 100.0],
-            "avg_gaze_y": [0.0, 100.0],
-        })
-
-        result = analyzer.analyze(slide_data, set_name="test_set", slide_index=0)
-        self.assertIsNotNone(result)
-        self.assertIn("hit_count", result.columns)
 
     def test_bbox_text_analyzer_analyze(self):
         analyzer = BBoxTextAnalyzer(self.output_folder)

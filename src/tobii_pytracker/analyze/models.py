@@ -2240,7 +2240,6 @@ class VoiceTranscription(BaseAnalyzer):
 
 from .bbox import (
     analyze_bbox_attention,
-    analyze_bbox_image,
     analyze_bbox_text,
     analyze_bbox_timeseries,
     bbox_edges_centered,
@@ -2250,7 +2249,6 @@ from .bbox import (
     parse_input_data,
     parse_objects_bboxes,
     plot_bbox_attention,
-    plot_bbox_image,
     plot_bbox_text,
     plot_bbox_timeseries,
     point_inside_bbox,
@@ -2398,52 +2396,6 @@ class BBoxTimeSeriesAnalyzer(BaseAnalyzer):
             show=show,
             save_path=save_path,
             normalize_slide_index_column=self._normalize_slide_index_column,
-            filter_set_and_slide=self._filter_set_and_slide,
-        )
-
-
-class BBoxImageAnalyzer(BaseAnalyzer):
-    def analyze(
-        self,
-        slide_data: pd.DataFrame,
-        set_name: Optional[Any] = None,
-        slide_index: Optional[Any] = None,
-    ) -> pd.DataFrame:
-        self.results = analyze_bbox_image(
-            slide_data=slide_data,
-            set_name=set_name,
-            slide_index=slide_index,
-            normalize_slide_index_column=self._normalize_slide_index_column,
-            filter_set_and_slide=self._filter_set_and_slide,
-        )
-        return self.results
-
-    def plot_analysis(
-        self,
-        scored_bboxes: pd.DataFrame,
-        gaze_data: pd.DataFrame,
-        screenshot_path: Path,
-        set_name: Optional[str] = None,
-        slide_index: Optional[int] = None,
-        title: Optional[str] = None,
-        top_k: Optional[int] = 20,
-        min_hits: int = 1,
-        show_gaze: bool = True,
-        show: bool = True,
-        save_path: Optional[Path] = None,
-    ):
-        return plot_bbox_image(
-            scored_bboxes=scored_bboxes,
-            gaze_data=gaze_data,
-            screenshot_path=screenshot_path,
-            set_name=set_name,
-            slide_index=slide_index,
-            title=title,
-            top_k=top_k,
-            min_hits=min_hits,
-            show_gaze=show_gaze,
-            show=show,
-            save_path=save_path,
             filter_set_and_slide=self._filter_set_and_slide,
         )
 

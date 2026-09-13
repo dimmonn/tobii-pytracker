@@ -1,4 +1,5 @@
 import yaml
+from pathlib import Path
 from psychopy.iohub import launchHubServer
 from .custom_logger import CustomLogger
 from tobii_pytracker.configs.custom_config import CustomConfig
@@ -45,12 +46,39 @@ def launch_hub_server(eyetracker_config_file, window):
     >>> tracker.getPosition()
     (-0.1, 0.2)
     """
-    iohub_config = CustomConfig.read_config(eyetracker_config_file)
+    config_path = Path(eyetracker_config_file)
+    iohub_config = CustomConfig.read_config(str(config_path))
 
-    io = launchHubServer(**iohub_config, window=window)
+    launch_kwargs = dict(iohub_config)
+    if window is not None:
+        launch_kwargs["window"] = window
+
+    try:
+        io = launchHubServer(**launch_kwargs)
+    except RuntimeError as exc:
+        tracker_class = get_tracker_class(iohub_config)
+        is_tobii_tracker = "tobii" in tracker_class.lower()
+        fallback_config_path = config_path.with_name("mouse_eyetracker_config.yaml")
+        if is_tobii_tracker and fallback_config_path.exists():
+            LOGGER.warning(
+                "Tobii ioHub startup failed (%s). Falling back to mouse eyetracker config: %s",
+                exc,
+                fallback_config_path,
+            )
+            fallback_config = CustomConfig.read_config(str(fallback_config_path))
+            fallback_kwargs = dict(fallback_config)
+            if window is not None:
+                fallback_kwargs["window"] = window
+            io = launchHubServer(**fallback_kwargs)
+        else:
+            raise RuntimeError(
+                f"Failed to start ioHub using {eyetracker_config_file}: {exc}"
+            ) from exc
+
     tracker = io.devices.tracker
-    r = tracker.runSetupProcedure()
-    LOGGER.debug(r)
+    if window is not None:
+        r = tracker.runSetupProcedure()
+        LOGGER.debug(r)
     tracker.setRecordingState(True)
 
     return io, tracker

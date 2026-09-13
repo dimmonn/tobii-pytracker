@@ -5,11 +5,18 @@ import threading
 from datetime import datetime
 from psychopy import event, core
 
-from .utils import gui, eyetracker
-from .utils.voice import VoiceRecorder
-from .utils.custom_logger import CustomLogger
-from .configs.custom_config import CustomConfig
-from .datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
+try:
+    from .utils import gui, eyetracker
+    from .utils.voice import VoiceRecorder
+    from .utils.custom_logger import CustomLogger
+    from .configs.custom_config import CustomConfig
+    from .datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
+except ImportError:  # script execution fallback: python src/tobii_pytracker/main.py
+    from utils import gui, eyetracker
+    from utils.voice import VoiceRecorder
+    from utils.custom_logger import CustomLogger
+    from configs.custom_config import CustomConfig
+    from datasets.custom_dataset import TextDataset, ImageDataset, TimeSeriesDataset
 
 LOGGER = None
 
@@ -213,7 +220,7 @@ def main(config, loop_count, eyetracker_config_file,
 
                 objects_bboxes = {}
                 data = sample['data']
-                classification = sample['class'].lower()
+                classification = str(sample['class']).lower()
                 screenshot_path, objects_bboxes = gui.draw_window(config, 
                                             window,
                                             sample,
@@ -385,6 +392,5 @@ def cli():
 
 if __name__ == "__main__":
     cli()
-
 
 
