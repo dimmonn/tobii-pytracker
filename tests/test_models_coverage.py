@@ -377,6 +377,9 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
         
         result = analyzer.analyze(raw_data, gaze_data)
         self.assertIsNotNone(result)
+        self.assertIn("polygon", result.columns)
+        self.assertIsNotNone(result.loc[0, "polygon"])
+        self.assertTrue(np.allclose(np.asarray(result.loc[0, "polygon"], dtype=float), np.asarray(polygon, dtype=float)))
     
     def test_bbox_analyzer_with_rect_bbox(self):
         
@@ -404,6 +407,58 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
         
         result = analyzer.analyze(raw_data, gaze_data)
         self.assertIsNotNone(result)
+
+    def test_bbox_analyzer_with_polygon_in_bbox_payload(self):
+        analyzer = BBoxAttentionAnalyzer(self.output_folder)
+
+        polygon = [[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]]
+        raw_data = pd.DataFrame({
+            "set_name": ["test_set"],
+            "slide_index": [0],
+            "objects_bboxes": [{
+                "image_bboxes": [
+                    {"bbox": polygon, "class": "polygon-box", "conf": 1.0},
+                ]
+            }],
+        })
+        gaze_data = pd.DataFrame({
+            "avg_gaze_x": [0.0, 50.0],
+            "avg_gaze_y": [0.0, 50.0],
+            "timestamp": [0.0, 16.67],
+            "set_name": ["test_set", "test_set"],
+            "slide_index": [0, 0],
+        })
+
+        result = analyzer.analyze(raw_data, gaze_data)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.loc[0, "bbox_class"], "polygon-box")
+        self.assertEqual(int(result.loc[0, "hit_count"]), 1)
+        self.assertTrue(np.allclose(np.asarray(result.loc[0, "polygon"], dtype=float), np.asarray(polygon, dtype=float)))
+
+    def test_bbox_analyzer_evaluate_summary(self):
+        analyzer = BBoxAttentionAnalyzer(self.output_folder)
+        raw_data = pd.DataFrame({
+            "set_name": ["test_set"],
+            "slide_index": [0],
+            "objects_bboxes": [{
+                "image_bboxes": [
+                    {"bbox": {"cx": 0.0, "cy": 0.0, "w": 20.0, "h": 20.0}},
+                    {"bbox": {"cx": 100.0, "cy": 100.0, "w": 20.0, "h": 20.0}},
+                ]
+            }],
+        })
+        gaze_data = pd.DataFrame({
+            "avg_gaze_x": [0.0, 5.0, 120.0],
+            "avg_gaze_y": [0.0, 5.0, 120.0],
+            "timestamp": [0.0, 16.67, 33.33],
+            "set_name": ["test_set", "test_set", "test_set"],
+            "slide_index": [0, 0, 0],
+        })
+        scored = analyzer.analyze(raw_data, gaze_data)
+        summary = analyzer.evaluate(scored)
+        self.assertEqual(len(summary), 1)
+        self.assertIn("coverage_by_bboxes", summary.columns)
+        self.assertEqual(int(summary.loc[0, "bbox_count"]), 2)
     
     def test_bbox_analyzer_with_numeric_slide_index(self):
         
