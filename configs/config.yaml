@@ -1,23 +1,23 @@
 dataset:
   image:
     bbox_model:  superpixel #grid | superpixel | saliency
-    path: datasets/chess
+    path: datasets/varia
 
-#   text:
-#     label_column_name: sentiment
-#     text_column_name: selected_text
-#     color: white
-#     background_color: black
-#     bbox_model: word # word|line|sentence
-#     path: datasets/twitter/tweets.csv
+  # text:
+  #   label_column_name: sentiment
+  #   text_column_name: selected_text
+  #   color: white
+  #   background_color: black
+  #   bbox_model: word # word|line|sentence
+  #   path: datasets/twitter/tweets.csv
 
-#   time_series:
-#       # Dataset: ECG200 (UCR Time Series Archive)
-#       # License: CC BY 4.0
-#       # Source: https://www.timeseriesclassification.com
-#     label_column_name: class
-#     bbox_model:  sample #|window
-#     path: datasets/ecg/ecg200.csv
+  # time_series:
+  #     # Dataset: ECG200 (UCR Time Series Archive)
+  #     # License: CC BY 4.0
+  #     # Source: https://www.timeseriesclassification.com
+  #   label_column_name: class
+  #   bbox_model:  sample #|window
+  #   path: datasets/ecg/ecg200.csv
 
 display:
   monitor: 
