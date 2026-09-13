@@ -145,8 +145,7 @@ class TestSaccadeAnalyzerCoverage(unittest.TestCase):
             method="acceleration",
             min_duration=0.01
         )
-        
-        # Create data with acceleration peaks
+
         x = np.array([100 + i for i in range(50)])
         y = np.array([150 + i*0.5 for i in range(50)])
         
@@ -330,15 +329,13 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
     def test_bbox_analyzer_analyze_basic(self):
         
         analyzer = BBoxAttentionAnalyzer(self.output_folder)
-        
-        # Create minimal raw data
+
         raw_data = pd.DataFrame({
             "set_name": ["test_set"],
             "slide_index": [0],
             "objects_bboxes": [{}],
         })
-        
-        # Create gaze data
+
         gaze_data = pd.DataFrame({
             "avg_gaze_x": [100, 110, 120],
             "avg_gaze_y": [150, 160, 170],
@@ -353,8 +350,7 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
     def test_bbox_analyzer_with_polygon_bboxes(self):
         
         analyzer = BBoxAttentionAnalyzer(self.output_folder)
-        
-        # BBox with polygon coordinates
+
         polygon = [[100, 150], [200, 150], [200, 250], [100, 250]]
         bbox_record = {
             "bbox": {"x": 100, "y": 150, "w": 100, "h": 100},
@@ -384,8 +380,7 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
     def test_bbox_analyzer_with_rect_bbox(self):
         
         analyzer = BBoxAttentionAnalyzer(self.output_folder)
-        
-        # BBox with centered format
+
         bbox_record = {
             "bbox": {"cx": 150, "cy": 200, "w": 100, "h": 100},
             "rect_bbox": {"x": 100, "y": 150, "width": 100, "height": 100},
@@ -490,8 +485,7 @@ class TestBBoxAttentionAnalyzerCoverage(unittest.TestCase):
             "slide_index": [0],
             "objects_bboxes": [{}],
         })
-        
-        # Fixation format data
+
         gaze_data = pd.DataFrame({
             "x_mean": [110, 120, 130],
             "y_mean": [160, 170, 180],
