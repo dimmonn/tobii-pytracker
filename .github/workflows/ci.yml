@@ -3,7 +3,6 @@ name: CI
 on:
   push:
     branches:
-      - test-bbox-image-dataset-tuning
       - main
   pull_request:
     branches:
