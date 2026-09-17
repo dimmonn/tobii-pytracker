@@ -1,13 +1,12 @@
-import numpy as np
-import pandas as pd
-from pathlib import Path
-from typing import Optional, Any, Dict, List, Literal
-from scipy.stats import entropy
-import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
-from .data_loader import DataLoader
-from scipy.ndimage import gaussian_filter
 
+from typing import Literal
+from tobii_pytracker.configs.custom_config import CustomConfig
+from pathlib import Path
+from typing import Any, Optional
+
+import pandas as pd
+from matplotlib.patches import Rectangle
+from PIL import Image
 
 # ======================================================
 # BASE ANALYZER
@@ -28,8 +27,9 @@ class BaseAnalyzer:
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.results: Optional[pd.DataFrame] = None
+        self.config = CustomConfig("../configs/config.yaml")
 
-    def analyze(self, *args, **kwargs) -> pd.DataFrame:
+    def analyze(self, *args, **kwargs) -> Any:
         raise NotImplementedError
 
     def plot_analysis(self, *args, **kwargs):
@@ -1949,6 +1949,7 @@ class VoiceTranscription(BaseAnalyzer):
         filename = filename or f"{self.__class__.__name__}_results.json"
         filepath = self.output_folder / filename
 
+        self.output_folder.mkdir(parents=True, exist_ok=True)
         self.results.to_json(filepath, orient="records", indent=4, force_ascii=False)
 
         # optionally save a flat CSV version without raw gaze point lists
@@ -2242,12 +2243,14 @@ from .bbox import (
     analyze_bbox_attention,
     bbox_edges_centered,
     evaluate_bbox_attention,
-    parse_objects_bboxes,
     plot_bbox_attention,
-    point_inside_bbox,
-    point_inside_polygon,
-    polygon_to_plot_coords,
-    polygon_vertices,
+    extract_text_bboxes,
+    extract_gaze_points,
+    gaze_inside_bbox,
+    extract_image_bboxes,
+    extract_gaze,
+    resolve_image_path,
+    bbox_contains_gaze
 )
 
 
@@ -2338,3 +2341,397 @@ class BBoxAttentionAnalyzer(BaseAnalyzer):
             save_path=save_path,
             filter_set_and_slide=self._filter_set_and_slide,
         )
+
+
+from .bbox import (
+    parse_objects_bboxes,
+    parse_input_data,
+    extract_timeseries_bboxes,
+    point_inside_bbox,
+    point_inside_polygon,
+    polygon_to_plot_coords,
+    polygon_vertices,
+    get_plot_bounds,
+    calculate_points,
+    get_valid_gaze,
+    get_visited_bboxes,
+    get_series_range,
+    setup_ax_rectanulars,
+    add_rect_to_image_bbox
+)
+
+class BBoxTimeSeriesAnalyzer(BaseAnalyzer):
+
+    def __init__(
+        self,
+        output_folder: Path,
+        data: pd.DataFrame = None
+    ):
+        super().__init__(output_folder)
+        self.data = data
+
+    def analyze(self, *args, **kwargs) -> dict[str, Any]:
+        row = self.data.iloc[0]
+        input_data = parse_input_data(row["input_data"])
+        timeseries_bboxes = extract_timeseries_bboxes(row["objects_bboxes"])
+        area_x, area_y = self.config.get_area_of_interest_size()
+        plot_x_min, plot_y_min, plot_x_max, plot_y_max = get_plot_bounds(
+            area_x,
+            area_y,
+        )
+        n_points = len(input_data)
+        if n_points == 0:
+            raise ValueError("input_data is empty for the selected slide")
+        g_min, g_max = get_series_range(input_data)
+        points_x, points_y = calculate_points(
+            input_data=input_data,
+            area_x=area_x,
+            area_y=area_y,
+            plot_x_min=plot_x_min,
+            plot_y_min=plot_y_min,
+            plot_x_max=plot_x_max,
+            plot_y_max=plot_y_max,
+            g_min=g_min,
+            g_max=g_max,
+        )
+        gaze_x, gaze_y = get_valid_gaze(row)
+        visited_bboxes = get_visited_bboxes(
+            timeseries_bboxes,
+            gaze_x,
+            gaze_y,
+        )
+        return {
+            "n_points": n_points,
+            "area_x": area_x,
+            "area_y": area_y,
+            "points_x": points_x,
+            "points_y": points_y,
+            "gaze_x": gaze_x,
+            "gaze_y": gaze_y,
+            "timeseries_bboxes": timeseries_bboxes,
+            "visited_bboxes": visited_bboxes,
+        }
+
+    def plot_analysis(self, analysis_results: dict[str, Any]):
+        fig, ax = plt.subplots(figsize=(14, 7))
+        ax.set_title("Input data with gaze-visited time-series bounding boxes", fontsize=13)
+        ax.set_xlabel("Center-origin x (px)")
+        ax.set_ylabel("Center-origin y (px)")
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xlim(-analysis_results['area_x'] / 2.0, analysis_results['area_x'] / 2.0)
+        ax.set_ylim(-analysis_results['area_y'] / 2.0, analysis_results['area_y'] / 2.0)
+        ax.plot(analysis_results['points_x'], analysis_results['points_y'], color="#9aa0a6", linewidth=1.0, alpha=0.35)
+        ax.scatter(analysis_results['points_x'], analysis_results['points_y'],
+                   c=np.linspace(0.0, 1.0, analysis_results["n_points"]), cmap="viridis", s=18, edgecolors="none",
+                   alpha=0.9)
+
+        ax.scatter(analysis_results['gaze_x'], analysis_results['gaze_y'], s=10, c="black", alpha=0.2,
+                   label="gaze samples")
+
+        channel_palette = plt.get_cmap("tab10")
+        setup_ax_rectanulars(analysis_results, ax, channel_palette)
+        plt.tight_layout()
+        plt.show()
+
+class BBoxTextAnalyzer(BaseAnalyzer):
+
+    def __init__(
+        self,
+        output_folder: Path,
+        data: pd.DataFrame = None
+    ):
+        super().__init__(output_folder)
+        self.data = data
+
+    def analyze(self, *args, **kwargs) -> dict[str, Any]:
+        row = self.data.iloc[0]
+        text_bboxes = extract_text_bboxes(
+            row["objects_bboxes"],
+            level="words",
+        )
+        if not text_bboxes:
+            raise ValueError(
+                "No word bounding boxes were found in objects_bboxes."
+            )
+        gaze_x, gaze_y = extract_gaze_points(row, self.data)
+        area_x, area_y = self.config.get_area_of_interest_size()
+        visited_indices = set()
+        samples_per_word = {}
+        bbox_padding = 0.0
+        for word_idx, word_info in enumerate(text_bboxes):
+            bbox = word_info["bbox"]
+            inside = gaze_inside_bbox(
+                gaze_x,
+                gaze_y,
+                bbox,
+                padding=bbox_padding,
+            )
+            sample_count = int(np.count_nonzero(inside))
+            samples_per_word[word_idx] = sample_count
+            if sample_count > 0:
+                visited_indices.add(word_idx)
+        return {
+            "area_x": area_x,
+            "area_y": area_y,
+            "gaze_x": gaze_x,
+            "gaze_y": gaze_y,
+            "text_bboxes": text_bboxes,
+            "visited_indices": visited_indices,
+            "samples_per_word": samples_per_word,
+        }
+
+    def plot_analysis(self, analysis_results: dict[str, Any]):
+
+        fig, ax = plt.subplots(figsize=(14, 7))
+
+        ax.set_title(
+            "Text with gaze-visited word bounding boxes",
+            fontsize=13,
+        )
+        ax.set_xlabel("Center-origin x (px)")
+        ax.set_ylabel("Center-origin y (px)")
+        ax.set_aspect("equal", adjustable="box")
+
+        ax.set_xlim(-analysis_results['area_x'] / 2.0, analysis_results['area_x'] / 2.0)
+        ax.set_ylim(-analysis_results['area_y'] / 2.0, analysis_results['area_y'] / 2.0)
+
+        # Draw gaze trajectory before individual samples.
+        if analysis_results["gaze_x"].size > 0:
+            ax.plot(
+                analysis_results['gaze_x'],
+                analysis_results['gaze_y'],
+                color="black",
+                linewidth=0.7,
+                alpha=0.12,
+                zorder=2,
+            )
+
+            ax.scatter(
+                analysis_results['gaze_x'],
+                analysis_results['gaze_y'],
+                s=12,
+                c="black",
+                alpha=0.22,
+                edgecolors="none",
+                label="gaze samples",
+                zorder=3,
+            )
+
+        for word_idx, word_info in enumerate(analysis_results['text_bboxes']):
+            word = str(word_info.get("word", ""))
+            bbox = word_info["bbox"]
+            x_min = bbox["cx"] - bbox["w"] / 2.0
+            y_min = bbox["cy"] - bbox["h"] / 2.0
+
+            is_visited = word_idx in analysis_results['visited_indices']
+
+            edge_color = "red" if is_visited else "#4285f4"
+            text_color = "#b00020" if is_visited else "#202124"
+            face_color = "#ffebee" if is_visited else "#e8f0fe"
+            line_width = 2.5 if is_visited else 1.0
+            fill_alpha = 0.40 if is_visited else 0.18
+
+            rect = Rectangle(
+                (x_min, y_min),
+                bbox["w"],
+                bbox["h"],
+                facecolor=face_color,
+                edgecolor=edge_color,
+                linewidth=line_width,
+                alpha=fill_alpha,
+                zorder=1,
+            )
+            ax.add_patch(rect)
+
+            # Use bbox height as a rough guide for readable font size.
+            font_size = max(8.0, min(18.0, bbox["h"] * 0.30))
+
+            ax.text(
+                bbox["cx"],
+                bbox["cy"],
+                word,
+                ha="center",
+                va="center",
+                fontsize=font_size,
+                color=text_color,
+                fontweight="bold" if is_visited else "normal",
+                zorder=4,
+            )
+
+            # Optional annotation with the number of gaze samples.
+            if is_visited:
+                ax.text(
+                    bbox["cx"],
+                    y_min + bbox["h"] + 5,
+                    f"n={analysis_results['samples_per_word'][word_idx]}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                    color="red",
+                    zorder=5,
+                )
+
+        # Invisible legend elements explaining bbox colors.
+        ax.plot(
+            [],
+            [],
+            color="red",
+            linewidth=2.5,
+            label="gaze-visited word",
+        )
+        ax.plot(
+            [],
+            [],
+            color="#4285f4",
+            linewidth=1.0,
+            label="unvisited word",
+        )
+
+        ax.legend(loc="upper right")
+        ax.grid(alpha=0.12)
+
+        plt.tight_layout()
+        plt.show()
+
+        visited_words = [
+            analysis_results['text_bboxes'][idx].get("word", "")
+            for idx in sorted(analysis_results['visited_indices'])
+        ]
+
+        print("Visited words:", visited_words)
+        print(
+            "Gaze samples per word:",
+            {
+                analysis_results['text_bboxes'][idx].get("word", ""): analysis_results['samples_per_word'][idx]
+                for idx in range(len(analysis_results['text_bboxes']))
+            },
+        )
+
+class BBoxImagesAnalyzer(BaseAnalyzer):
+
+    def __init__(
+        self,
+        output_folder: Path,
+        data: pd.DataFrame = None
+    ):
+        super().__init__(output_folder)
+        self.data = data
+
+
+    def analyze(self, *args, **kwargs) -> dict[str, Any]:
+
+        row = self.data.iloc[0]
+        image_bboxes = extract_image_bboxes(row["objects_bboxes"])
+        gaze_x, gaze_y = extract_gaze(row, self.data)
+
+        if not image_bboxes:
+            raise ValueError("No image_bboxes found for the selected slide.")
+        image_column = "screenshot_file"
+
+        if image_column not in row or not isinstance(row[image_column], str):
+            image_column = "input_data"
+        image_path = row[image_column]
+        area_x, area_y = self.config.get_area_of_interest_size()
+        area_x = float(area_x)
+        area_y = float(area_y)
+        visited_bbox_indices = set()
+        gaze_hits_per_bbox = []
+
+        for bbox_idx, bbox_info in enumerate(image_bboxes):
+            bbox = bbox_info["bbox"]
+            inside = bbox_contains_gaze(bbox, gaze_x, gaze_y)
+            number_of_hits = int(np.count_nonzero(inside))
+
+            gaze_hits_per_bbox.append(number_of_hits)
+
+            if number_of_hits > 0:
+                visited_bbox_indices.add(bbox_idx)
+
+        return {
+            "area_x": area_x,
+            "area_y": area_y,
+            "gaze_x": gaze_x,
+            "gaze_y": gaze_y,
+            "image_path": image_path,
+            "image_bboxes": image_bboxes,
+            "visited_bbox_indices": visited_bbox_indices,
+            "gaze_hits_per_bbox": gaze_hits_per_bbox,
+        }
+
+    def plot_analysis(self, analysis_results: dict[str, Any]):
+
+        image_path = resolve_image_path(analysis_results["image_path"], root="../")
+        image = np.asarray(Image.open(image_path).convert("RGB"))
+
+        fig, ax = plt.subplots(figsize=(12, 9))
+
+        ax.set_title(
+            "Image with gaze-visited superpixel bounding boxes",
+            fontsize=13,
+        )
+        ax.imshow(
+            image,
+            extent=(
+                -analysis_results["area_x"] / 2.0,
+                analysis_results["area_x"] / 2.0,
+                -analysis_results["area_y"] / 2.0,
+                analysis_results["area_y"] / 2.0,
+            ),
+            origin="upper",
+            interpolation="nearest",
+            zorder=0,
+        )
+
+        bbox_palette = plt.get_cmap("tab20")
+
+        add_rect_to_image_bbox(analysis_results, ax, bbox_palette)
+
+        # Plot gaze samples.
+        ax.scatter(
+            analysis_results["gaze_x"],
+            analysis_results["gaze_y"],
+            s=70,
+            c="#00FFFF",
+            alpha=0.5,
+            edgecolors="black",
+            linewidths=0.4,
+            label="gaze samples",
+            zorder=10
+        )
+
+        # Emphasize samples falling in any superpixel bbox.
+        visited_gaze = np.zeros(len(analysis_results["gaze_x"]), dtype=bool)
+
+        for bbox_idx in analysis_results["visited_bbox_indices"]:
+            visited_gaze |= bbox_contains_gaze(
+                analysis_results["image_bboxes"][bbox_idx]["bbox"],
+                analysis_results["gaze_x"],
+                analysis_results["gaze_y"],
+            )
+
+        ax.scatter(
+            analysis_results["gaze_x"][visited_gaze],
+            analysis_results["gaze_y"][visited_gaze],
+            s=70,
+            c="red",
+            alpha=0.55,
+            edgecolors="none",
+            label="gaze inside a superpixel bbox",
+            zorder=5,
+        )
+
+        ax.set_xlabel("Center-origin x (px)")
+        ax.set_ylabel("Center-origin y (px)")
+        ax.set_aspect("equal", adjustable="box")
+
+        ax.set_xlim(-analysis_results["area_x"] / 2.0, analysis_results["area_x"] / 2.0)
+        ax.set_ylim(-analysis_results["area_y"] / 2.0, analysis_results["area_y"] / 2.0)
+
+        ax.legend(loc="upper right")
+        plt.tight_layout()
+        plt.show()
+
+        print(f"Image: {image_path}")
+        print(f"Number of superpixel bounding boxes: {len(analysis_results['image_bboxes'])}")
+        print(f"Number of gaze-visited bounding boxes: {len(analysis_results['visited_bbox_indices'])}")
+        print(f"Visited bbox indices: {sorted(analysis_results['visited_bbox_indices'])}")
