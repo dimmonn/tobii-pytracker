@@ -23,11 +23,11 @@ class BaseAnalyzer:
       columns like avg_gaze_x, avg_gaze_y, input_data, slide_index, etc.
     """
 
-    def __init__(self, output_folder: Path):
+    def __init__(self, output_folder: Path, config: CustomConfig = None):
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.results: Optional[pd.DataFrame] = None
-        self.config = CustomConfig("../configs/config.yaml")
+        self.config = config
 
     def analyze(self, *args, **kwargs) -> Any:
         raise NotImplementedError
@@ -2365,9 +2365,10 @@ class BBoxTimeSeriesAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None
+        data: pd.DataFrame = None,
+        config: CustomConfig = None,
     ):
-        super().__init__(output_folder)
+        super().__init__(output_folder, config=config)
         self.data = data
 
     def analyze(self, *args, **kwargs) -> dict[str, Any]:
@@ -2438,9 +2439,10 @@ class BBoxTextAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None
+        data: pd.DataFrame = None,
+        config: CustomConfig = None,
     ):
-        super().__init__(output_folder)
+        super().__init__(output_folder, config=config)
         self.data = data
 
     def analyze(self, *args, **kwargs) -> dict[str, Any]:
@@ -2612,9 +2614,10 @@ class BBoxImagesAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None
+        data: pd.DataFrame = None,
+        config: CustomConfig = None,
     ):
-        super().__init__(output_folder)
+        super().__init__(output_folder, config=config)
         self.data = data
 
 
