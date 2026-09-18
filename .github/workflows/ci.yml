@@ -1,60 +1,84 @@
-name: Label PR with coverage
+name: CI
 
 on:
-  workflow_run:
-    workflows:
-      - CI
-    types:
-      - completed
+  push:
+    branches:
+      - test-bbox-image-dataset-tuning
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
-  issues: write
-  pull-requests: write
 
 jobs:
-  label:
-    name: Update coverage label
+  test:
+    name: Python 3.10 tests
     runs-on: ubuntu-latest
 
-    if: >
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
-
     steps:
-      - name: Find PR number
-        id: pr
-        uses: actions/github-script@v7
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install headless PsychoPy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libglu1-mesa \
+            libgl1-mesa-dri \
+            xvfb
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
         with:
-          script: |
-            const run = context.payload.workflow_run;
+          python-version: "3.10"
+          cache: pip
 
-            if (!run.pull_requests || run.pull_requests.length === 0) {
-              core.setFailed("No pull request associated with this workflow run.");
-              return;
-            }
+      - name: Upgrade packaging tools
+        run: |
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            wheel
 
-            core.setOutput(
-              "number",
-              run.pull_requests[0].number.toString()
-            );
+      - name: Install project
+        run: python -m pip install -e .
 
-      - name: Download coverage artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: coverage-report
-          path: coverage
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: ${{ github.event.workflow_run.id }}
+      - name: Install test tooling
+        run: python -m pip install pytest pytest-cov
 
-      - name: Calculate coverage label
+      - name: Install scikit-image
+        run: python -m pip install "scikit-image>=0.24,<0.26"
+
+      - name: Install PsychoPy runtime dependency
+        run: python -m pip install "psychopy>=2024.1.4,<2025.1.0" --no-deps
+
+      - name: Ensure test dataset directory exists
+        run: mkdir -p datasets
+
+      - name: Run tests with coverage in virtual X display
+        env:
+          PYTHONUNBUFFERED: "1"
+          DISPLAY: ":99"
+        run: |
+          xvfb-run -a \
+            -s "-screen 0 1280x1024x24" \
+            pytest tests -v \
+              --cov=src/tobii_pytracker \
+              --cov-report=term \
+              --cov-report=xml:coverage.xml \
+              --cov-report=html:htmlcov
+
+      - name: Calculate coverage
         id: coverage
         run: |
           python - <<'PY'
           import os
           import xml.etree.ElementTree as ET
 
-          root = ET.parse("coverage/coverage.xml").getroot()
+          root = ET.parse("coverage.xml").getroot()
           pct = float(root.attrib["line-rate"]) * 100
 
           if pct >= 90:
@@ -67,61 +91,71 @@ jobs:
               label = "coverage: low (<70%)"
 
           print(f"Coverage: {pct:.2f}%")
-          print(f"Label: {label}")
+          print(f"Coverage label: {label}")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"label={label}\n")
-              f.write(f"pct={pct:.2f}\n")
+              f.write(f"coverage_pct={pct:.2f}\n")
+              f.write(f"coverage_label={label}\n")
           PY
 
-      - name: Update PR coverage label
-        uses: actions/github-script@v7
-        env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          KEEP_LABEL: ${{ steps.coverage.outputs.label }}
+      - name: Upload coverage XML report
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const issue_number = Number(process.env.PR_NUMBER);
-            const keepLabel = process.env.KEEP_LABEL;
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
 
-            const coverageLabels = [
-              "coverage: excellent (>=90%)",
-              "coverage: good (80-89%)",
-              "coverage: fair (70-79%)",
-              "coverage: low (<70%)",
-            ];
+      - name: Upload HTML line coverage report
+        id: coverage_html_artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov/
+          if-no-files-found: error
 
-            const { data: existing } =
-              await github.rest.issues.listLabelsOnIssue({
-                owner,
-                repo,
-                issue_number,
-              });
+      - name: Publish coverage summary
+        run: |
+          COVERAGE_ARTIFACT_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts/${{ steps.coverage_html_artifact.outputs.artifact-id }}"
 
-            const existingNames = existing.map(label => label.name);
+          echo "### Test coverage: ${{ steps.coverage.outputs.coverage_pct }}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Coverage label: \`${{ steps.coverage.outputs.coverage_label }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Open line-level coverage report (HTML)](${COVERAGE_ARTIFACT_URL})" >> "$GITHUB_STEP_SUMMARY"
 
-            for (const name of coverageLabels) {
-              if (name !== keepLabel && existingNames.includes(name)) {
-                await github.rest.issues.removeLabel({
-                  owner,
-                  repo,
-                  issue_number,
-                  name,
-                });
-              }
-            }
+  package:
+    name: Build package
+    runs-on: ubuntu-latest
+    needs: test
 
-            if (!existingNames.includes(keepLabel)) {
-              await github.rest.issues.addLabels({
-                owner,
-                repo,
-                issue_number,
-                labels: [keepLabel],
-              });
-            }
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-            core.info(
-              `PR #${issue_number} labeled: ${keepLabel}`
-            );
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Upgrade packaging tools
+        run: |
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            wheel \
+            build \
+            twine
+
+      - name: Build distribution
+        run: python -m build
+
+      - name: Check distribution
+        run: python -m twine check dist/*
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: tobii-pytracker-dist
+          path: dist/
+          if-no-files-found: error
