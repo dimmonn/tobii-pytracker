@@ -2365,14 +2365,12 @@ class BBoxTimeSeriesAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None,
         config: CustomConfig = None,
     ):
         super().__init__(output_folder, config=config)
-        self.data = data
 
-    def analyze(self, *args, **kwargs) -> dict[str, Any]:
-        row = self.data.iloc[0]
+    def analyze(self, background_data: pd.DataFrame) -> dict[str, Any]:
+        row = background_data.iloc[0]
         input_data = parse_input_data(row["input_data"])
         timeseries_bboxes = extract_timeseries_bboxes(row["objects_bboxes"])
         area_x, area_y = self.config.get_area_of_interest_size()
@@ -2439,14 +2437,12 @@ class BBoxTextAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None,
         config: CustomConfig = None,
     ):
         super().__init__(output_folder, config=config)
-        self.data = data
 
-    def analyze(self, *args, **kwargs) -> dict[str, Any]:
-        row = self.data.iloc[0]
+    def analyze(self, background_data: pd.DataFrame) -> dict[str, Any]:
+        row = background_data.iloc[0]
         text_bboxes = extract_text_bboxes(
             row["objects_bboxes"],
             level="words",
@@ -2455,7 +2451,7 @@ class BBoxTextAnalyzer(BaseAnalyzer):
             raise ValueError(
                 "No word bounding boxes were found in objects_bboxes."
             )
-        gaze_x, gaze_y = extract_gaze_points(row, self.data)
+        gaze_x, gaze_y = extract_gaze_points(row, background_data)
         area_x, area_y = self.config.get_area_of_interest_size()
         visited_indices = set()
         samples_per_word = {}
@@ -2614,18 +2610,16 @@ class BBoxImagesAnalyzer(BaseAnalyzer):
     def __init__(
         self,
         output_folder: Path,
-        data: pd.DataFrame = None,
         config: CustomConfig = None,
     ):
         super().__init__(output_folder, config=config)
-        self.data = data
 
 
-    def analyze(self, *args, **kwargs) -> dict[str, Any]:
+    def analyze(self, background_data: pd.DataFrame) -> dict[str, Any]:
 
-        row = self.data.iloc[0]
+        row = background_data.iloc[0]
         image_bboxes = extract_image_bboxes(row["objects_bboxes"])
-        gaze_x, gaze_y = extract_gaze(row, self.data)
+        gaze_x, gaze_y = extract_gaze(row, background_data)
 
         if not image_bboxes:
             raise ValueError("No image_bboxes found for the selected slide.")
