@@ -2393,7 +2393,7 @@ class BBoxTimeSeriesAnalyzer(BaseAnalyzer):
             g_min=g_min,
             g_max=g_max,
         )
-        gaze_x, gaze_y = get_valid_gaze(row)
+        gaze_x, gaze_y = get_valid_gaze(row, background_data)
         visited_bboxes = get_visited_bboxes(
             timeseries_bboxes,
             gaze_x,

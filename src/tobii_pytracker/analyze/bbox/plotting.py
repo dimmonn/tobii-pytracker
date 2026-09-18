@@ -192,7 +192,7 @@ def plot_bbox_attention(
     return fig, ax
 
 
-def setup_ax_rectanulars(self, analysis_results: dict[str, Any], ax, channel_palette: Colormap):
+def setup_ax_rectanulars(analysis_results: dict[str, Any], ax, channel_palette: Colormap):
     for bbox_info in analysis_results['timeseries_bboxes']:
         bbox = bbox_info["bbox"]
         channel_idx = int(bbox_info.get("channel_idx", 0))

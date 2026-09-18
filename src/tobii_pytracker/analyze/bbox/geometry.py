@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 from matplotlib.path import Path as MplPath
-
+import pandas as pd
 
 def bbox_edges_centered(bbox: Dict[str, float]) -> Dict[str, float]:
     cx = float(bbox["cx"])
@@ -85,7 +85,6 @@ def get_plot_bounds(
     return plot_x_min, plot_y_min, plot_x_max, plot_y_max
 
 def calculate_points(
-        self,
         input_data: np.ndarray,
         area_x: float,
         area_y: float,
@@ -121,24 +120,24 @@ def calculate_points(
 
 
 def get_valid_gaze(
-        row: Any,
+        row: Any, background_data: pd.DataFrame
 ) -> tuple[np.ndarray, np.ndarray]:
     gaze_x = (
         row["avg_gaze_x"]
         if "avg_gaze_x" in row
-        else self.data["avg_gaze_x"].to_numpy()
+        else background_data["avg_gaze_x"].to_numpy()
     )
     gaze_y = (
         row["avg_gaze_y"]
         if "avg_gaze_y" in row
-        else self.data["avg_gaze_y"].to_numpy()
+        else background_data["avg_gaze_y"].to_numpy()
     )
 
     if not isinstance(gaze_x, np.ndarray):
-        gaze_x = self.data["avg_gaze_x"].to_numpy(dtype=float)
+        gaze_x = background_data["avg_gaze_x"].to_numpy(dtype=float)
 
     if not isinstance(gaze_y, np.ndarray):
-        gaze_y = self.data["avg_gaze_y"].to_numpy(dtype=float)
+        gaze_y = background_data["avg_gaze_y"].to_numpy(dtype=float)
 
     valid_gaze = np.isfinite(gaze_x) & np.isfinite(gaze_y)
 
@@ -147,9 +146,17 @@ def get_valid_gaze(
 
     return gaze_x, gaze_y
 
+def _get_bbox_bounds(
+        bbox: dict[str, Any],
+) -> tuple[float, float, float, float]:
+    x_min = bbox["cx"] - bbox["w"] / 2.0
+    x_max = bbox["cx"] + bbox["w"] / 2.0
+    y_min = bbox["cy"] - bbox["h"] / 2.0
+    y_max = bbox["cy"] + bbox["h"] / 2.0
+
+    return x_min, x_max, y_min, y_max
 
 def get_visited_bboxes(
-        self,
         timeseries_bboxes: list[dict[str, Any]],
         gaze_x: np.ndarray,
         gaze_y: np.ndarray,
@@ -159,7 +166,7 @@ def get_visited_bboxes(
     for bbox_info in timeseries_bboxes:
         bbox = bbox_info["bbox"]
 
-        x_min, x_max, y_min, y_max = self._get_bbox_bounds(bbox)
+        x_min, x_max, y_min, y_max = _get_bbox_bounds(bbox)
 
         inside = (
                 (gaze_x >= x_min)
